@@ -1,7 +1,7 @@
 ---
 title: Ingest data to Postres via Pandas
 author: edalfon
-date: '2017-17-21'
+date: '2017-07-21'
 categories:
   - Python
 tags:
