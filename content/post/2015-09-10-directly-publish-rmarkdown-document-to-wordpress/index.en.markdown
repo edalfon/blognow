@@ -1,0 +1,154 @@
+---
+title: Directly publish RMarkdown document to WordPress
+author: edalfon
+date: '2015-09-10'
+slug: directly-publish-rmarkdown-document-to-wordpress
+categories:
+  - R
+tags: []
+description: ~
+image: ~
+math: ~
+license: ~
+hidden: no
+comments: yes
+---
+
+
+
+
+[RMarkdown](http://rmarkdown.rstudio.com/) is great. I use it very often for almost all my data analysis reports. I use it also to write these blog posts. Soon after I started this blog, I was looking for a way to publish the posts automatically and directly from the .Rmd file. . After checking out other alternatives (including publishing to [RPubs](https://rpubs.com/) and link it from the blog), I found the `RWordPress` package that makes publishing to WordPress very very easy. I actually started this blog somewhere else, but after I found this package I decided to move to WordPress.
+
+There are several web pages/blogs out there explaining how to publish to WordPress directly from R ([here](http://yihui.name/knitr/demo/wordpress/), [here](https://wkmor1.wordpress.com/2012/07/01/rchievement-of-the-day-3-bloggin-from-r-14/), [here](http://francojc.github.io/publishing-rmarkdown-to-wordpress-or-jekyll/)). Those sources explain in detail how to do it, so you should go and read if you want to understand the nitty-gritty of the process. This post basically uses the code from those sources and adds a couple of tweaks to make the process as automatic as possible and solve a couple of issues I had to struggle with. So, this post shows code to:
+
+- Create a function that receives as parameter the path to the .Rmd file to publish 
+- Automatically set the post title using the title of the .Rmd file (yaml header)
+- Deal with a SSL problem (in Windows and some versions of R)
+- Create a User-Defined Command in RStudio and bind it to a keyboard shortcut (so you can publish to WordPress with one keystroke)
+
+Here's the code. It is throughly commented (I think). 
+
+
+```r
+#' Takes an .Rmd file path, knitr it, render as html and publish to WordPress
+#'
+#' This function is based on these blog posts:
+#' http://yihui.name/knitr/demo/wordpress/
+#' http://francojc.github.io/publishing-rmarkdown-to-wordpress-or-jekyll/
+#' http://thinktostart.com/analyze-instagram-r/
+#' The last one is actually not about RMarkdown nor publishing to WordPress
+#' but I found there a solution to the SSL connection problem in Windows.
+#' Another blog post worth checking out is:
+#' http://fredhasselman.com/?p=303
+#' @param rmdfile path to an .Rmd file 
+#' @param publish publish the post automatically?, or leave it as draft
+#' @param shortcode syntax highlight?
+#' @param ... other params to be passed to knitr::knit2wp()
+#' @return the return of knitr::knit2wp()
+#' @keywords RWordPress, knitr, rmarkdown, WordPress
+#' @export
+#' @examples
+#' later ...
+rmd2wp <- function(rmdfile, publish = TRUE, shortcode = TRUE, ...){
+    if (!require('RWordPress'))
+        install.packages('RWordPress', repos = 'http://www.omegahat.org/R', type = 'source')       
+    library(RWordPress)
+    library(knitr)
+    library(yaml)
+    
+    # Get the title from the .rmd file, contained as yaml parameter ############
+    # This code comes from:
+    # http://stackoverflow.com/questions/30153194/access-name-of-rmd-file-and-use-in-r
+    # Read in the lines of your file
+    lines <- readLines(rmdfile)
+    # Find the header portion contained between the --- lines. 
+    header_line_nums <- which(lines == "---") + c(1, -1)
+    # Create a string of just that header portion
+    header <- paste(lines[seq(header_line_nums[1], 
+                              header_line_nums[2])], 
+                    collapse = "\n")
+    # parse it as yaml, which returns a list of property values
+    title <- yaml::yaml.load(header)$title
+    
+    # Fix SSL connection problem ###############################################
+    # this line is necessary to fix a SSL connection problem in Windows, for 
+    # versions of R
+    if (get_os() == "windows")
+        options(RCurlOptions = list(
+            verbose = FALSE, ssl.verifypeer = FALSE, 
+            capath = system.file("CurlSSL", "cacert.pem", package = "RCurl")))
+    
+    # knit the .rmd file and publish to WordPress ##############################
+    # Here, set the blog parameters
+    options(WordpressLogin = c(YOUR_WORDPRESS_USERNAME = "YOUR_PASSWORD"),
+            WordpressURL = "https://YOUR_BLOG.wordpress.com/xmlrpc.php")
+    # Set upload.fun for figures to upload to imgur.com
+    opts_knit$set(upload.fun = imgur_upload, base.url = NULL)
+    # knit the .rmd file and publish to WordPress
+    knitr::knit2wp(input = rmdfile, title = title, shortcode = shortcode, 
+                   publish = publish, ...)
+}
+
+#' Returns a string indicating the operating system in which R is running
+#'
+#' Check it out here, because there are several ways to check the OS and 
+#' not all of them are consistent enough
+#' http://www.r-bloggers.com/identifying-the-os-from-r/?utm_source=feedburner&utm_medium=feed&utm_campaign=Feed%3A+RBloggers+%28R+bloggers%29
+#' @seealso Sys.info(), .Platform$OS.type
+#' @keywords clipboard, sys.info, system info
+#' @export
+#' @examples
+#' Really?, an example?
+get_os <- function(){
+    # Check out these SO posts.
+    # http://stackoverflow.com/questions/9035674/r-function-to-copy-to-clipboard-on-mac-osx
+    # http://stackoverflow.com/questions/13676862/writeclipboard-for-matrices-or-data-frames/30425632#30425632
+	sysinf <- Sys.info()
+	if (!is.null(sysinf)){
+		os <- sysinf['sysname']
+		if (os == 'Darwin')
+			os <- "osx"
+	} else { ## mystery machine
+		os <- .Platform$OS.type
+		if (grepl("^darwin", R.version$os))
+			os <- "osx"
+		if (grepl("linux-gnu", R.version$os))
+			os <- "linux"
+	}
+	tolower(os)
+}
+```
+
+How is it different from the code posted in the blogs cited above? Well, as I said, I basically used the code in those blogs in a function that receives only the path to the .Rmd file and it knitr and publish it to WordPress. That's the function `rmd2wp`. Note that the username, password and your site URL is hard-coded in the function. Of course I could have used also function arguments to set these values, thereby improving reusability and manteinability of the code, but I really do not plan to have any other blog/account so I didn't bother.
+
+Function `rmd2wp` has a couple of tweaks to make the process as automatic as possible. First, the function reads the yaml header of the .Rmd file to get the title and use it as the blog post title. I did this because -inexplicable to me- the function `knit2wp` receives as argument the input file and also a title for the blog post. That makes not much sense to me because, most probably, you have already set your document's title in the yaml header of it. So, to me it seems just natural to use it as the title of the blog post.
+
+Another little tweak is a line to handle a problem connecting using SSL in my windows machine and R version 3.1. Note that for this I rely on a helper function (`get_os`) to determine if the code is running in a windows machine. As you can see in the comments, this function is also taken from some blog posts and StackOverflow questions.
+
+Finally, I wanted to make publishing to WordPress as easy as possible. What can be easier than to hit one single key? Luckly, the [preview version of RStudio now supports customizing keyboard shortcuts and, most importantly, user-defined commands (since v0.99.644)](https://support.rstudio.com/hc/en-us/articles/206382178). And [they were very very responsive and included the possibility to get as an argument in the user-defined command the path of the current file](https://support.rstudio.com/hc/communities/public/questions/204645888-Is-it-possible-to-get-the-current-file-path-in-a-user-defined-command-?locale=en-us). So, it is very easy to create a user-defined command that calls the `rmd2wp` function on the current file path and voilà!, with one keystroke you can now publish to WordPress!
+
+You only have to create a `bindings.R` file and put it in the directory `~\.R\keybindings\R` with this content:
+
+
+```r
+# A function for the user-defined command
+publish_rmd2wp <- function(content, filePath, range) {
+    rmd2wp(filePath, publish = FALSE, encoding = "WINDOWS-1252")
+}
+
+# bind the user-defined command to the keyboard shortcut
+registerUserCommand(name = "Publish RMarkdown document to WordPress", 
+                    shortcuts = "F12", fn = publish_rmd2wp)
+```
+
+As you can see, it is very straightforward. You only have to:
+
+- create a function for the user-defined command (this is the code that will be executed when the user-defined command is invoked, in our case, the function only calls the `rmd2wp` that processes the .Rmd file and publishes it to WordPress) and 
+- register the user defined command associated with a keyboard shortcut.
+
+And there you go. Just make sure you check regularly the [support page for this feature in RStudio](https://support.rstudio.com/hc/en-us/articles/206382178) because 
+
+> this feature [customizing keyboard shorcuts] is currently only available in the preview release of RStudio (since v0.99.644) and will be evolving in the short term.
+
+And here we go. This post will be published to WordPress at the press of a button ...
+
