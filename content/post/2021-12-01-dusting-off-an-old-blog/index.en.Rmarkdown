@@ -1,0 +1,168 @@
+---
+title: Dusting off an old blog
+author: E!
+date: '2021-12-01'
+slug: dusting-off-an-old-blog
+categories:
+  - R
+tags:
+  - blogdown
+description: ~
+image: https://i.imgur.com/lsjJif9h.png
+math: yes
+license: ~
+hidden: no
+comments: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, warning = FALSE, message = FALSE, error = TRUE, 
+  include = TRUE, cache.comments = TRUE, cache = TRUE, fig.height = 4, 
+  fig.width = 5
+)
+
+knitr::opts_knit$set(upload.fun = knitr::imgur_upload)
+# https://superuser.com/questions/1238552/how-to-resize-quickly-a-imgur-image
+```
+
+
+Let's use `{blogdown}` to dust off an old blog, where I used to take notes on 
+data analysis things (using SQL mainly on Postgres, R, Python, in that order).
+
+**TODO**: bring old posts
+
+Here just to try the blog setup and remember key things to tweak:
+
+# Theme
+
+Let's use [Hugo Theme Stack https://github.com/CaiJimmy/hugo-theme-stack/](https://github.com/CaiJimmy/hugo-theme-stack/)
+(arguments [here](https://restlessdata.com.au/p/updating-a-blog-theme/) were convincing )
+
+I won't spend much time tweaking this, so it will work/look as per the defaults.
+Just a few changes are:
+
+- menu.main.params.newTab: False
+- hugo-theme-stack/assets/scss/variables.scss:
+  + --main-top-padding: 25px; instead of 50
+  + --section-separation: 20px; instead of 40
+  + --card-border-radius: 50px; instead of 10
+- hugo-theme-stack/assets/scss/partials/article.scss
+  + .article-image set default height: 100px; instead of 150, and 150 and 150
+    for md and xl instead of 200 and 250
+- hugo-theme-stack/assets/scss/partials/layout/article.scss
+  + .article-header -> .article-image, set max-height: 30vh; instead of 50
+    object-fit: contain; instead of cover
+- tableOfContents -> startLevel: 1
+
+# Make sure plots are rendered
+
+```{r histogram}
+hist(mtcars$mpg, main = "Histogram")
+```
+
+And of course throw a ggplot in there too!
+
+```{r}
+library(ggplot2)
+
+ggplot(diamonds, aes(x = cut, fill = clarity)) +
+  geom_bar(position = "dodge") +
+  theme_classic() +
+  theme(legend.position = "none")
+```
+
+
+# Try a couple of `{htmlwidgets}`
+
+For this to work, you gotta set `unsafe: true` in the `config.yaml`.
+
+```yaml
+
+markup:
+    goldmark:
+        renderer:
+            ## Set to true if you have HTML content inside Markdown
+            unsafe: true
+```
+
+After doing this, it works! 
+(you may not need to do this if using `.Rmd` that directly renders to `html` 
+using pandoc)
+
+## `{visNetwork}`
+
+```{r}
+# An example from visNetwork
+# https://datastorm-open.github.io/visNetwork/options.html
+library(visNetwork)
+nb <- 10
+nodes <- data.frame(id = 1:nb, label = paste("Label", 1:nb),
+ group = sample(LETTERS[1:3], nb, replace = TRUE), value = 1:nb,
+ title = paste0("<p>", 1:nb,"<br>Tooltip !</p>"), stringsAsFactors = FALSE)
+
+edges <- data.frame(from = c(8,2,7,6,1,8,9,4,6,2),
+ to = c(3,7,2,7,9,1,5,3,2,9),
+ value = rnorm(nb, 10), label = paste("Edge", 1:nb),
+ title = paste0("<p>", 1:nb,"<br>Edge Tooltip !</p>"))
+
+visNetwork(nodes, edges, height = "500px", width = "100%") %>% 
+  visOptions(highlightNearest = TRUE, nodesIdSelection = TRUE) |> 
+  visLayout(randomSeed = 123)
+```
+
+
+## `{DT}`
+
+**TODO**: DT does not seem to be working
+
+```{r}
+DT::datatable(mtcars)
+```
+
+Let's see later what is going on. (Clash with other widgets in this page?)
+
+## `{plotly}`
+
+```{r}
+# Example from plotly page
+# https://plotly.com/r/bubble-charts/
+library(plotly)
+
+data <- read.csv("https://raw.githubusercontent.com/plotly/datasets/master/school_earnings.csv")
+
+data$State <- as.factor(c(
+  'Massachusetts', 'California', 'Massachusetts', 'Pennsylvania', 'New Jersey', 
+  'Illinois', 'Washington DC', 'Massachusetts', 'Connecticut', 'New York', 
+  'North Carolina', 'New Hampshire', 'New York', 'Indiana', 'New York', 
+  'Michigan', 'Rhode Island', 'California', 'Georgia', 'California', 
+  'California'
+))
+
+fig <- plot_ly(
+  data, x = ~Women, y = ~Men, text = ~School, type = 'scatter', 
+  mode = 'markers', size = ~Gap, color = ~State, colors = 'Paired', 
+  marker = list(opacity = 0.5, sizemode = 'diameter')
+)
+fig <- fig %>% layout(title = 'Gender Gap in Earnings per University',
+         xaxis = list(showgrid = FALSE),
+         yaxis = list(showgrid = FALSE),
+         showlegend = FALSE)
+
+fig
+```
+
+
+
+
+# Let's check Math is working 
+
+And that it works inline $ x^2 $ like this
+
+And in blocks like this
+
+$$
+log(p/1-p)
+$$
+
+(You need to enable `math: yes` in the yaml header)

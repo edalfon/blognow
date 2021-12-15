@@ -1,0 +1,52 @@
+<script src="index.en_files/htmlwidgets/htmlwidgets.js"></script>
+<link href="index.en_files/vis/vis-network.min.css" rel="stylesheet" />
+<script src="index.en_files/vis/vis-network.min.js"></script>
+<script src="index.en_files/visNetwork-binding/visNetwork.js"></script>
+<p>Let’s use <code>{blogdown}</code> to dust off an old blog, where I used to take notes on data analysis things (using SQL mainly on Postgres, R, Python, in that order).</p>
+<p><strong>TODO</strong>: bring old posts</p>
+<p>Here just to try the blog setup and remember key things to tweak:</p>
+<div id="theme" class="section level1" number="1">
+<h1><span class="header-section-number">1</span> Theme</h1>
+<p>Let’s use Hugo Theme Stack https://github.com/CaiJimmy/hugo-theme-stack/</p>
+</div>
+<div id="make-sure-plots-are-rendered" class="section level1" number="2">
+<h1><span class="header-section-number">2</span> Make sure plots are rendered</h1>
+<div class="sourceCode" id="cb1"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb1-1"><a href="#cb1-1" aria-hidden="true" tabindex="-1"></a><span class="fu">hist</span>(mtcars<span class="sc">$</span>mpg)</span></code></pre></div>
+<p><img src="https://i.imgur.com/42yHG0m.png" width="672" /></p>
+</div>
+<div id="try-a-couple-of-htmlwidgets" class="section level1" number="3">
+<h1><span class="header-section-number">3</span> Try a couple of <code>{htmlwidgets}</code></h1>
+<p>For this to work, you gotta set <code>unsafe: true</code> in the <code>config.yaml</code>.</p>
+<div class="sourceCode" id="cb2"><pre class="sourceCode yaml"><code class="sourceCode yaml"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="fu">markup</span><span class="kw">:</span></span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="at">    </span><span class="fu">goldmark</span><span class="kw">:</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="at">        </span><span class="fu">renderer</span><span class="kw">:</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="co">            ## Set to true if you have HTML content inside Markdown</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="at">            </span><span class="fu">unsafe</span><span class="kw">:</span><span class="at"> </span><span class="ch">true</span></span></code></pre></div>
+<p>After doing this, it works!</p>
+<div class="sourceCode" id="cb3"><pre class="sourceCode r"><code class="sourceCode r"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="co"># An example from visNetwork</span></span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="co"># https://datastorm-open.github.io/visNetwork/options.html</span></span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="fu">library</span>(visNetwork)</span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a>nb <span class="ot">&lt;-</span> <span class="dv">10</span></span>
+<span id="cb3-5"><a href="#cb3-5" aria-hidden="true" tabindex="-1"></a>nodes <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">id =</span> <span class="dv">1</span><span class="sc">:</span>nb, <span class="at">label =</span> <span class="fu">paste</span>(<span class="st">&quot;Label&quot;</span>, <span class="dv">1</span><span class="sc">:</span>nb),</span>
+<span id="cb3-6"><a href="#cb3-6" aria-hidden="true" tabindex="-1"></a> <span class="at">group =</span> <span class="fu">sample</span>(LETTERS[<span class="dv">1</span><span class="sc">:</span><span class="dv">3</span>], nb, <span class="at">replace =</span> <span class="cn">TRUE</span>), <span class="at">value =</span> <span class="dv">1</span><span class="sc">:</span>nb,</span>
+<span id="cb3-7"><a href="#cb3-7" aria-hidden="true" tabindex="-1"></a> <span class="at">title =</span> <span class="fu">paste0</span>(<span class="st">&quot;&lt;p&gt;&quot;</span>, <span class="dv">1</span><span class="sc">:</span>nb,<span class="st">&quot;&lt;br&gt;Tooltip !&lt;/p&gt;&quot;</span>), <span class="at">stringsAsFactors =</span> <span class="cn">FALSE</span>)</span>
+<span id="cb3-8"><a href="#cb3-8" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-9"><a href="#cb3-9" aria-hidden="true" tabindex="-1"></a>edges <span class="ot">&lt;-</span> <span class="fu">data.frame</span>(<span class="at">from =</span> <span class="fu">c</span>(<span class="dv">8</span>,<span class="dv">2</span>,<span class="dv">7</span>,<span class="dv">6</span>,<span class="dv">1</span>,<span class="dv">8</span>,<span class="dv">9</span>,<span class="dv">4</span>,<span class="dv">6</span>,<span class="dv">2</span>),</span>
+<span id="cb3-10"><a href="#cb3-10" aria-hidden="true" tabindex="-1"></a> <span class="at">to =</span> <span class="fu">c</span>(<span class="dv">3</span>,<span class="dv">7</span>,<span class="dv">2</span>,<span class="dv">7</span>,<span class="dv">9</span>,<span class="dv">1</span>,<span class="dv">5</span>,<span class="dv">3</span>,<span class="dv">2</span>,<span class="dv">9</span>),</span>
+<span id="cb3-11"><a href="#cb3-11" aria-hidden="true" tabindex="-1"></a> <span class="at">value =</span> <span class="fu">rnorm</span>(nb, <span class="dv">10</span>), <span class="at">label =</span> <span class="fu">paste</span>(<span class="st">&quot;Edge&quot;</span>, <span class="dv">1</span><span class="sc">:</span>nb),</span>
+<span id="cb3-12"><a href="#cb3-12" aria-hidden="true" tabindex="-1"></a> <span class="at">title =</span> <span class="fu">paste0</span>(<span class="st">&quot;&lt;p&gt;&quot;</span>, <span class="dv">1</span><span class="sc">:</span>nb,<span class="st">&quot;&lt;br&gt;Edge Tooltip !&lt;/p&gt;&quot;</span>))</span>
+<span id="cb3-13"><a href="#cb3-13" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb3-14"><a href="#cb3-14" aria-hidden="true" tabindex="-1"></a><span class="fu">visNetwork</span>(nodes, edges, <span class="at">height =</span> <span class="st">&quot;500px&quot;</span>, <span class="at">width =</span> <span class="st">&quot;100%&quot;</span>) <span class="sc">%&gt;%</span> </span>
+<span id="cb3-15"><a href="#cb3-15" aria-hidden="true" tabindex="-1"></a>  <span class="fu">visOptions</span>(<span class="at">highlightNearest =</span> <span class="cn">TRUE</span>, <span class="at">nodesIdSelection =</span> <span class="cn">TRUE</span>) <span class="sc">|</span><span class="er">&gt;</span> </span>
+<span id="cb3-16"><a href="#cb3-16" aria-hidden="true" tabindex="-1"></a>  <span class="fu">visLayout</span>(<span class="at">randomSeed =</span> <span class="dv">123</span>)</span></code></pre></div>
+<div id="htmlwidget-ad540661ac98e9c5889e" style="width:100%;height:500px;" class="visNetwork html-widget"></div>
+<script type="application/json" data-for="htmlwidget-ad540661ac98e9c5889e">{"x":{"nodes":{"id":[1,2,3,4,5,6,7,8,9,10],"label":["Label 1","Label 2","Label 3","Label 4","Label 5","Label 6","Label 7","Label 8","Label 9","Label 10"],"group":["A","A","B","A","A","A","B","C","A","A"],"value":[1,2,3,4,5,6,7,8,9,10],"title":["<p>1<br>Tooltip !<\/p>","<p>2<br>Tooltip !<\/p>","<p>3<br>Tooltip !<\/p>","<p>4<br>Tooltip !<\/p>","<p>5<br>Tooltip !<\/p>","<p>6<br>Tooltip !<\/p>","<p>7<br>Tooltip !<\/p>","<p>8<br>Tooltip !<\/p>","<p>9<br>Tooltip !<\/p>","<p>10<br>Tooltip !<\/p>"]},"edges":{"from":[8,2,7,6,1,8,9,4,6,2],"to":[3,7,2,7,9,1,5,3,2,9],"value":[9.96924540677904,9.38510359881111,10.0644696229055,10.3262965991845,10.956891378197,9.23448000984526,9.13451049165292,9.21698769588941,9.53859077668264,9.40079184510531],"label":["Edge 1","Edge 2","Edge 3","Edge 4","Edge 5","Edge 6","Edge 7","Edge 8","Edge 9","Edge 10"],"title":["<p>1<br>Edge Tooltip !<\/p>","<p>2<br>Edge Tooltip !<\/p>","<p>3<br>Edge Tooltip !<\/p>","<p>4<br>Edge Tooltip !<\/p>","<p>5<br>Edge Tooltip !<\/p>","<p>6<br>Edge Tooltip !<\/p>","<p>7<br>Edge Tooltip !<\/p>","<p>8<br>Edge Tooltip !<\/p>","<p>9<br>Edge Tooltip !<\/p>","<p>10<br>Edge Tooltip !<\/p>"]},"nodesToDataframe":true,"edgesToDataframe":true,"options":{"width":"100%","height":"100%","nodes":{"shape":"dot"},"manipulation":{"enabled":false},"layout":{"randomSeed":123}},"groups":["A","B","C"],"width":"100%","height":"500px","idselection":{"enabled":true,"style":"width: 150px; height: 26px","useLabels":true,"main":"Select by id"},"byselection":{"enabled":false,"style":"width: 150px; height: 26px","multiple":false,"hideColor":"rgba(200,200,200,0.5)","highlight":false},"main":null,"submain":null,"footer":null,"background":"rgba(0, 0, 0, 0)","highlight":{"enabled":true,"hoverNearest":false,"degree":1,"algorithm":"all","hideColor":"rgba(200,200,200,0.5)","labelOnly":true},"collapse":{"enabled":false,"fit":false,"resetHighlight":true,"clusterOptions":null,"keepCoord":true,"labelSuffix":"(cluster)"}},"evals":[],"jsHooks":[]}</script>
+<ol style="list-style-type: decimal">
+<li></li>
+</ol>
+<p>Let’s check MathJax is working $ x^2 $</p>
+<p><span class="math display">\[
+log(p/1-p)
+\]</span></p>
+</div>
