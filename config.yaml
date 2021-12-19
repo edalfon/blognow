@@ -11,7 +11,7 @@ paginate: 5
 title: A note-taking device
 
 # Change it to your Disqus shortname before using
-disqusShortname: hugo-theme-stack
+disqusShortname: edalfon-netlify-app
 
 # GA Tracking ID
 googleAnalytics:
@@ -66,7 +66,7 @@ params:
         provider: disqus
 
         disqusjs:
-            shortname:
+            shortname: 
             apiUrl:
             apiKey:
             admin:
