@@ -9,6 +9,7 @@ tags:
   - DuckDB
   - PostgreSQL
 slug: test-driving-duckdb-and-arrow
+image: https://i.imgur.com/OEagu52.png
 hidden: no
 comments: yes
 ---
@@ -246,7 +247,7 @@ CREATE TABLE table_name AS SELECT * FROM table_name_fg;
 ```
 
 
-## Results: How long it takes to ingest such data?
+## Results: Who is faster ingesting such data?
 
 ```{r}
 ingest_tiny <- backend_tar(bench_ingest_tar_.backend.tiny_data.txt)
@@ -377,9 +378,11 @@ Some non-exaustive TODOs:
 
 - [ ] Try to find the underlying cause of DuckDB getting slower
 - [ ] Perhaps fiddle with config options for each backend and ingest method. So far I used only the defaults.
+- [ ] Take a look at the gains that would bring setting optimal data types 
 - [ ] Compare size on disk
 - [ ] Compare aggregate queries
 - [ ] Compare joins
 - [ ] Sometime, try and run this kind of thing on a not-so-poorman's laptop
+- [ ] What about an alter table add column, in a columnar format?
 - [ ] ...
 

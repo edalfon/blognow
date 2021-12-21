@@ -212,7 +212,7 @@ OPTIONS (
 CREATE TABLE table_name AS SELECT * FROM table_name_fg;
 ```
 
-## Results: How long it takes to ingest such data?
+## Results: Who is faster ingesting such data?
 
 Well, for this exercise Arrow is fast!, way faster than Postgres, but also faster than DuckDB. Arrow native file format is also faster than parquet. Both the tests using tiny and small data show very similar results, where arrow file format is the fastest and compared to that it takes around:
 
@@ -222,7 +222,7 @@ Well, for this exercise Arrow is fast!, way faster than Postgres, but also faste
 
 There are no major differences associated to the approach used to ingest in each backend (so, no major overhead for auto-detecting file format and data types in DuckDB).
 
-<img src="https://i.imgur.com/QKE8ezR.png" width="50%" /><img src="https://i.imgur.com/OEagu52.png" width="50%" />
+<img src="https://i.imgur.com/7hv8LK1.png" width="50%" /><img src="https://i.imgur.com/WkXDiHs.png" width="50%" />
 
 <details>
 <summary>
@@ -906,7 +906,7 @@ NULL
 Interestingly, when the data are somewhat larger, at some point DuckDB’s performance degrades and falls behind Postgres. While the other relative times
 remain in the same ballpark (1.6x parquet, \~12x Postgres), now it takes almost 25x longer for DuckDB to ingest the data, compared to arrow. In absolute numbers, while Arrow takes less than 2 minutes to ingest the data, DuckDB takes about 40 minutes (and Postgres less than 20 minutes).
 
-<img src="https://i.imgur.com/eBWiY3z.png" width="480" style="display: block; margin: auto;" />
+<img src="https://i.imgur.com/KsHzH1A.png" width="480" style="display: block; margin: auto;" />
 
 <table class=" lightable-paper" style="font-family: &quot;Arial Narrow&quot;, arial, helvetica, sans-serif; width: auto !important; margin-left: auto; margin-right: auto;">
 <thead>
@@ -1479,10 +1479,12 @@ Some non-exaustive TODOs:
 
 -   [ ] Try to find the underlying cause of DuckDB getting slower
 -   [ ] Perhaps fiddle with config options for each backend and ingest method. So far I used only the defaults.
+-   [ ] Take a look at the gains that would bring setting optimal data types
 -   [ ] Compare size on disk
 -   [ ] Compare aggregate queries
 -   [ ] Compare joins
 -   [ ] Sometime, try and run this kind of thing on a not-so-poorman’s laptop
+-   [ ] What about an alter table add column, in a columnar format?
 -   [ ] …
 
 [^1]: meaning it does not fit comfortably in my laptop’s 32GB of RAM.
