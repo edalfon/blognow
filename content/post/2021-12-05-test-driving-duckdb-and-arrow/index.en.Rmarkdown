@@ -1,0 +1,385 @@
+---
+title: Test-driving DuckDB and Arrow in a poorman's laptop
+author: edalfon
+date: '2021-12-05'
+categories:
+  - R
+tags:
+  - Arrow
+  - DuckDB
+  - PostgreSQL
+slug: test-driving-duckdb-and-arrow
+hidden: no
+comments: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, warning = FALSE, message = FALSE, error = TRUE,
+  include = TRUE, cache.comments = TRUE, cache = FALSE, fig.height = 4,
+  fig.width = 5
+)
+
+knitr::opts_knit$set(upload.fun = knitr::imgur_upload)
+
+library(targets)
+backend_tar <- function(.x) {
+  targets::tar_read_raw(
+    name = deparse(substitute(.x)),
+    store = "/E/MEGA/R/backend_compare/_targets"
+  )
+}
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+library(bench)
+#' Custom autoplot for a bench_mark object
+#'
+#' I just wanted to tweak some of the defaults for the autoplot
+#'
+#' @param .x a bench_mark object as returned by e.g. bench::mark()
+#'
+#' @return ggplot2 object
+autoplot_bench <- function(.x) {
+  autoplot(.x) +
+    scale_y_bench_time(
+      n.breaks = 50,
+      guide  = guide_axis(check.overlap = TRUE)
+    ) +
+    theme(legend.position = "none") + # does not really add value just use space
+    xlab(NULL) +
+    theme(plot.title = element_text(hjust = 0.5))
+}
+```
+
+Whenever I have to analyze largish[^largish] data in my laptop, I instinctively
+fire up my good old PostgreSQL server running locally, ingest the data in there
+and breezily wrangle my way through the data using SQL. Postgres may not be the
+fastest alternative out there. But it is feature-rich: you can throw anything
+at it, and it just works. It's very hard to make it choke with an out-of-memory
+error and, by default, runs just fine in resource-constrained environments
+(e.g. in a Raspberry Pi).
+
+[^largish]: meaning it does not fit comfortably in my laptop's 32GB of RAM.
+
+I've kept an eye on [DuckDB](https://duckdb.org/) and [Apache
+Arrow](https://arrow.apache.org/) as other open-source alternatives for the
+workflow outlined above. Both share a number of features that make them very
+appealing for analytical workloads in general, and for the in-laptop-analytics
+in particular [^vaex]:
+
+- Columnar format and vectorized operations
+- In-process libraries (no need to install a server)
+- Handle larger-than-memory datasets
+- APIs available for several languages, including R and Python
+- Open-source
+
+[^vaex]: [Vaex](https://vaex.io/docs/index.html) has also been in my
+watch-list, and include most of these features. But it is Python-centric.
+
+I did try both DuckDB and Arrow some time ago (very quickly, though). But I do
+not use them routinely. At least not just yet. When I first tried them, Arrow
+did not support grouped aggregations and joins and that was a no-go for me.
+DuckDB did not have support for grouping sets or filtered aggregation (or at
+least I could not get it to work) and I found it slow ingesting data from CSV
+files (much slower than Postgres in that, even though queries were indeed
+faster).
+
+But both projects move at a very fast pace and now I see release news where
+[Arrow 6.0.0 "adds grouped aggregation and joins in the dplyr interface, on top
+of the new Arrow C++ query
+engine"](https://arrow.apache.org/blog/2021/11/04/6.0.0-release/) and [DuckDB
+announced "support for GROUPING SETS, ROLLUP,
+CUBE"](https://github.com/duckdb/duckdb/releases/tag/v0.3.1). So it is time to
+take both projects for a spin again (and try and document the test-drive here).
+
+# The test-drive
+
+Ultimately, I would like to run an existing data wrangling pipeline using
+DuckDB and Arrow as backends, and compare running time using PostgreSQL as
+backend. For this, DuckDB is particularly appealing because they use PostgreSQL
+parser and support a similar feature set. So, ideally, the pipeline can run on
+DuckDB simply by changing the connection without having to change the queries.
+That did not really work as smoothly, so I will be trying step-by-step: i)
+ingest the data, ii) try some aggregate queries, iii) joins, ..., and let's see
+how it goes.
+
+## The data
+
+For this test it was key to use real data. Meaning a large data set that I
+would actually have to use / have used for analysis in my laptop. Of course I
+could have simply used the popular NYC Taxi trip record data or any other large
+data set publicly available. But that would have been missing the point. I
+wanted to keep this exercise as close as possible to an actual use case for me.
+After all, this is just an informal test to see how to integrate DuckDB and/or
+Arrow in my workflow and to assess the potential benefits, for example, in
+terms of processing time [^nobenchmark].
+
+[^nobenchmark]: So this is not really a formal benchmark. Both DuckDB and Arrow
+have extensive testing and routinely benchmark their software, and this exercise by no means aims to oppose or replace that.
+
+I will use a few samples of a larger data set [^fulldata] that contains 25 columns (2 numeric, 2 timestamp, 10 integer and the rest text, most of them categorical variables, some with low cardinality -e.g. sex-, others with millions of different values). I will use one round of data (~500M rows) stored 
+in a csv file (uncompressed 82GB). First test in smaller samples (tiny, small, mid) before trying out using one whole round of data.
+
+[^fulldata]: The whole data comprise 12 csv files, each with 400M - 900M rows and uncompressed size between 50GB and 140GB.
+
+- Tiny data: 1M rows, csv uncompressed size ~170MB
+- Small data: 10M rows, csv uncompressed size ~1,7GB
+- Mid data: 70M rows, csv uncompressed size ~10GB
+- Round data: ~500M rows, csv uncompressed size ~82GB
+
+## The code and software
+
+I will be running this test from R, using `{targets}` to orchestrate the
+different steps and `{bench}` to benchmark code snippets and measure execution
+time.
+
+- DuckDB version 0.3.0 [I did not pay attention and ran this using 0.3.0 and then I noticed 0.3.1 is already available, which enables by default multi-threading; so perhaps I should re-run this with 0.3.1 to see if it changes the results]
+- Arrow version 6.0.0
+- PostgreSQL version 14.1
+
+Initially I will be using DuckDB and Arrow without fiddling with any configuration (no custom memory_limit or threads; just the defaults). In PostgreSQL, however, I typically tweak a couple of configuration parameters, in this case, `shared_buffers=2GB` and `work_mem=1GB` (see this [link](https://www.enterprisedb.com/postgres-tutorials/how-tune-postgresql-memory) for some useful rules-of-thumb).
+
+The code for the whole exercise is available in this [Github repo](https://github.com/edalfon/backend_compare)
+
+
+## A poorman's laptop
+
+Running this may take a while, so I cannot really use my daily driver laptop. But I do have an old laptop lying around that can be used for this.
+It's a 10-years old Dell XPS 17. I guess at the time it was a good machine:
+Processor Intel i7-2630QM, 8GB DDR3 RAM, SSD SATA, nowadays running Windows 10
+Home. But for today's standards, it can be considered a resource-constrained
+environment.
+
+So it's important to keep in mind the kind of machine running this exercise. Not sure about this, but I would consider the results as a lower bound to
+the performance improvements that DuckDB and Arrow could bring (e.g. Arrow
+explicitly try to take advantage of "modern hardware"). It will be interesting
+to see how much of a difference modern hardware would make. Hopefully soon, I
+will get my hands on a new fancy MacBook Pro to replicate this test.
+
+# Ingesting data
+
+## What will be tested
+
+I will compare the time it takes to ingest the raw data from the csv files into 
+each of the backends. 
+
+### Arrow
+
+In the case of Arrow, let's try with the two key file formats: i. parquet and ii. arrow (aka ips/feather; see `?arrow:open_dataset`). It boils down to use a couple of functions from the `{arrow}` R package: `open_dataset()` and `write_dataset()`, like this:
+
+``` r
+  csv_ds <- arrow::open_dataset(
+    sources = src_file,
+    format = "text",
+    delimiter = ";"
+  )
+  
+  arrow::write_dataset(
+    dataset = csv_ds,
+    path = arrow_path,
+    format = "arrow" # and "parquet"
+  )
+```
+
+### DuckDB
+
+For DuckDB, probably the simplest way is to use a `CREATE TABLE AS` statement with a query reading directly from the csv file using `read_csv_auto()`. This lets DuckDB detect everything (column names, delimiter, data types, etc.).
+
+``` sql
+CREATE TABLE table_name AS
+SELECT * 
+FROM read_csv_auto('src_file.csv')
+;
+```
+
+An alternative is the `COPY` statement. You would have to type more to "manually" create the table and decide on the data type for each column doing something like this: `CREATE TABLE table_name ("col1" TEXT, ...);`. And after that just copy the csv into that table:
+
+``` sql
+COPY table_name
+FROM 'src_file.csv' ( DELIMITER ';', HEADER )
+;
+```
+
+A third alternative [described in the documentation](https://duckdb.org/docs/data/csv) (hereafter labelled as copy2) is a slight variation of the COPY statement to let DuckDB detect the format "and omit the otherwise required configuration options."
+
+``` sql
+COPY table_name
+FROM 'src_file.csv' ( AUTO_DETECT TRUE )
+;
+```
+
+Let's compare these three approaches, just to take a look if there is any overhead associated to auto detection of csv format and data types.
+
+### PostgreSQL
+
+For Postgres, let's also compare the COPY statement approach, which uses very similar syntax as in DuckDB
+
+```sql
+COPY table_name
+FROM 'src_file.csv' (FORMAT 'csv', DELIMITER ';', HEADER )
+;
+```
+
+And an alternative using a foreign table and csv foreign data wrapper. 
+
+```sql
+CREATE EXTENSION IF NOT EXISTS file_fdw; 
+CREATE SERVER IF NOT EXISTS csv_src FOREIGN DATA WRAPPER file_fdw;
+CREATE FOREIGN TABLE table_name_fg (
+  col1 STRING,
+  ...
+)
+SERVER csv_src
+OPTIONS (
+  FILENAME 'src_file.csv',
+  FORMAT 'csv',
+  HEADER 'TRUE',
+  DELIMITER ';',
+  ENCODING 'UTF-8'
+)
+;
+
+CREATE TABLE table_name AS SELECT * FROM table_name_fg;
+```
+
+
+## Results: How long it takes to ingest such data?
+
+```{r}
+ingest_tiny <- backend_tar(bench_ingest_tar_.backend.tiny_data.txt)
+ingest_small <- backend_tar(bench_ingest_tar_.backend.small_data.txt)
+ingest_mid <- backend_tar(bench_ingest_tar_.backend.mid_data.txt)
+```
+
+```{r eval=FALSE}
+bench:::summary.bench_mark(ingest_tiny, relative = TRUE)
+bench:::summary.bench_mark(ingest_small, relative = TRUE)
+```
+
+Well, for this exercise Arrow is fast!, way faster than Postgres, but also faster than DuckDB. Arrow native file format is also faster than parquet. Both the tests using tiny and small data show very similar results, where arrow file format is the fastest and compared to that it takes around:
+
+- 1.6x longer to ingest into parquet
+- 5x  longer to ingest into DuckDB
+- 15x longer to ingest into PostgreSQL
+
+There are no major differences associated to the approach used to ingest in each backend (so, no major overhead for auto-detecting file format and data types in DuckDB).
+
+```{r out.width="50%"}
+autoplot_bench(ingest_tiny) + ggtitle("Tiny data (1M rows)")
+autoplot_bench(ingest_small) + ggtitle("Small data (10M rows)")
+```
+
+<details><summary>{bench} details for tiny data</summary>
+```{r}
+ingest_tiny |> 
+  kableExtra::kbl() |>
+  kableExtra::kable_paper(full_width = FALSE)
+```
+</details>
+
+
+<details><summary>{bench} details for small data</summary>
+```{r}
+ingest_small |> 
+  kableExtra::kbl() |>
+  kableExtra::kable_paper(full_width = FALSE)
+```
+</details>
+
+Interestingly, when the data are somewhat larger, at some point DuckDB's performance degrades and falls behind Postgres. While the other relative times 
+remain in the same ballpark (1.6x parquet, ~12x Postgres), now it takes almost 25x longer for DuckDB to ingest the data, compared to arrow. In absolute numbers, while Arrow takes less than 2 minutes to ingest the data, DuckDB takes about 40 minutes (and Postgres less than 20 minutes).
+
+```{r eval=FALSE}
+bench:::summary.bench_mark(ingest_mid, relative = TRUE)
+```
+
+```{r}
+#| fig.align = "center"
+autoplot_bench(ingest_mid) + ggtitle("Mid data (70M rows)")
+```
+
+```{r}
+# options(kableExtra.html.bsTable = TRUE)
+# library(kableExtra)
+backend_tar(bench_ingest_tar_.backend.mid_data.txt) |>
+  select(expression, min, median, total_time, n_itr, n_gc) |>
+  kableExtra::kbl() |>
+  kableExtra::kable_paper(full_width = FALSE)
+```
+
+<details><summary>{bench} details for mid data</summary>
+```{r}
+ingest_mid |> 
+  kableExtra::kbl() |>
+  kableExtra::kable_paper(full_width = FALSE)
+```
+</details>
+
+The results ingesting a whole round of data [^nobench] (~500 million rows in a single csv file, 82GB) are mostly consistent with the times shown above for mid data; DuckDB took more than 5 hours to ingest the whole file, followed by PostgreSQL that took a bit less than 3 hours, followed by parquet that took about 1 hour and the fastest is, again, Arrow taking only a bit more than 16 minutes.
+
+[^nobench]: No `bench::mark()` here, though, 'cause it would have taken ~4-5 
+days to run. 
+
+```{r out.width="40%"}
+tar_meta_all <- targets::tar_meta(
+  names = ends_with("_all"),
+  store = "/E/MEGA/R/backend_compare/_targets"
+)
+
+tar_meta_all |> 
+  mutate(time = prettyunits::pretty_sec(seconds)) |> 
+  select(name, seconds, time) |> 
+  DT::datatable(
+    escape = FALSE,
+    class = "display cell-border responsive nowrap compact",
+    options = list(
+      dom = 't',
+      columnDefs = list(list(visible=FALSE, targets=c(2)))
+    ),
+    fillContainer = FALSE
+  ) |> 
+  DT::formatStyle(
+    columns = 3, 
+    valueColumns = 2,
+    background = DT::styleColorBar(
+      data = c(0, max(tar_meta_all$seconds)), 
+      color = "deepskyblue", 
+      angle = -90
+    )
+  )
+```
+
+<br>
+
+<details><summary>Session Info</summary>
+```{r}
+backend_tar(siu)
+```
+</details>
+
+
+# Wrap-up
+
+My take home messages
+
+- Arrow is indeed (unbelievably) fast to parse a csv and ingest data, 
+  particularly, into the arrow file format. 
+- DuckDB looked fine at the beginning, but got slow when the data got larger. 
+  Would need to check why that happens (it should be faster than Postgres).
+- Despite being fast, Arrow did struggle with encoding. 
+- I could not quickly find how to tell arrow to read/ingest just some rows and 
+  not the whole csv file. It seems there is only support for `skip_rows` before column names and `skip_rows_after_names`, but not something like `max_rows`. This would be handy to inspect huge files and maybe write and test queries on a small sample, before send it on the whole data. In DuckDB, even though `read_csv()` does not have such an option, you can work around this by using a LIMIT statement while querying the csv file ([but watch out if you are trying to avoid invalid lines, that approach can bite you](https://github.com/duckdb/duckdb/issues/2777)).
+
+Some non-exaustive TODOs:
+
+- [ ] Try to find the underlying cause of DuckDB getting slower
+- [ ] Perhaps fiddle with config options for each backend and ingest method. So far I used only the defaults.
+- [ ] Compare size on disk
+- [ ] Compare aggregate queries
+- [ ] Compare joins
+- [ ] Sometime, try and run this kind of thing on a not-so-poorman's laptop
+- [ ] ...
+
