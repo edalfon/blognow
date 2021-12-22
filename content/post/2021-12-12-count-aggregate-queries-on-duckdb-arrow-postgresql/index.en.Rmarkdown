@@ -1,0 +1,315 @@
+---
+title: Count aggregate queries on DuckDB, Arrow and PostgreSQL
+author: edalfon
+date: '2021-12-12'
+slug: count-aggregate-queries-on-duckdb-arrow-postgresql
+categories:
+  - R
+tags:
+  - Arrow
+  - DuckDB
+  - PostgreSQL
+description: ~
+image: ~
+math: ~
+license: ~
+hidden: no
+comments: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, warning = FALSE, message = FALSE, error = TRUE,
+  include = TRUE, cache.comments = TRUE, cache = FALSE, fig.height = 4,
+  fig.width = 5
+)
+
+# knitr::opts_knit$set(upload.fun = knitr::imgur_upload)
+
+library(targets)
+backend_tar <- function(.x) {
+  targets::tar_read_raw(
+    name = deparse(substitute(.x)),
+    store = "/E/MEGA/R/backend_compare/_targets"
+  )
+}
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+library(bench)
+#' Custom autoplot for a bench_mark object
+#'
+#' I just wanted to tweak some of the defaults for the autoplot
+#'
+#' @param .x a bench_mark object as returned by e.g. bench::mark()
+#'
+#' @return ggplot2 object
+autoplot_bench <- function(.x, title = "") {
+  autoplot(.x) +
+    scale_y_bench_time(
+      n.breaks = 50,
+      guide  = guide_axis(check.overlap = TRUE)
+    ) +
+    facet_null() +
+    aes(color = collect_data) +
+    theme(legend.position = "bottom") + # does not really add value just use space
+    xlab(NULL) +
+    theme(plot.title = element_text(hjust = 0.5)) + 
+    ggtitle(title)
+}
+```
+
+Let's continue the test-drive of DuckDB and Arrow as alternatives to my beloved PostgreSQL, for in-laptop data analysis. See the [first post here](/p/test-driving-duckdb-and-arrow) for some context.
+
+Now that the raw CSVs have been ingested into DuckDB, Arrow/Parquet and PostgreSQL, we can start querying the data and see how each of them perform.
+
+# Count aggregate
+
+I will start with a basic count aggregate query that you can get using plain SQL as
+`SELECT COUNT(*) AS cnt, col FROM tbl GROUP BY col;` or using `{dplyr}` with `dplyr::count(tbl, col)`.
+
+## How to query each backend?
+
+To query data ingested into arrow/parquet files, I will use `{dplyr}` interface to Arrow Datasets, which now supports arrow-native aggregation queries (see [release note for Arrow 6.0](https://arrow.apache.org/docs/r/news/index.html#arrow-6-0-1-2021-11-20)). "Arrow no longer eagerly evaluates" and you need to "call compute() or collect() to evaluate the query". Although I would not expect major differences, let's also throw a collect()/compute() comparison into the mix to have a sense of the overhead associated to collecting the query results. So, the code to benchmark looks like this:
+
+```r
+tbl |> 
+  dplyr::count(col) |> 
+  dplyr::collect() # and dplyr::compute()
+```
+
+Where `tbl` is a pointer to the data obtained by calling `arrow::open_dataset(path, format = "arrow")` or `format = "parquet"`. 
+
+To query data ingested into DuckDB and PostgreSQL I will use plain SQL queries sent using a connection established via the `{DBI}` package (using `{odbc}` drivers for PostgreSQL and the native duckdb driver). To mimic the comparison between collect()/compute() above, let's use a `CREATE TABLE AS` statement (which would be similar to compute()) and simply omit it to mimic collect(). So the code to benchmark looks like this:
+
+```sql
+CREATE TABLE temptbl AS
+SELECT col, COUNT(*) AS cnt
+FROM table_name
+GROUP BY col
+;
+```
+
+Thanks to `{dbplyr}` it's also straightforward to use exactly the same `{dplyr}` interface to also query DuckDB and PostgreSQL,
+so I will throw that comparison into the mix as well (although I would not expect major differences, because translating such a simple query from dplyr to SQL should generate equivalent queries and query plan in the RDMS).
+
+Thus, the labels of the expressions benchmarked will follow the pattern `backend_interface`, where possible values are `[pg, duckdb, arrow, parquet]_[sql, dplyr]`. Backend combines how the data are stored and who does the heavy-lifting of actually crunching the data.
+
+And there is one additional case. DuckDB supports [directly querying parquet files](https://duckdb.org/docs/data/parquet). Here I will use the same SQL syntax as above, but using `parquet_scan()` in the `FROM` clause of the query. 
+
+```sql
+CREATE TABLE temptbl AS
+SELECT col, COUNT(*) AS cnt
+FROM parquet_scan('parquet_file_originally_ingested_by_arrow.parquet')
+GROUP BY col
+;
+```
+
+So in this case the data are stored in the parquet file, originally created by Arrow, but the heavy-lifting for the query will be done by DuckDB. [^toduckdb] So in this case the label will be parquet_duckdb_sql.
+
+[^toduckdb]: I am aware of [DuckDB - Arrow integration](https://duckdb.org/2021/12/03/duck-arrow.html) (`to_duckdb()`, `to_arrow()` and so on). I haven't looked into this, but I suppose ultimately that would do something like creating a view on the parquet file using `parquet_scan`.
+
+
+## Columns to group by
+
+I wanted to use group-by columns with different characteristics, just to see
+if there is any benefit/penalty associated to that. This dataset is not so diverse in terms of the columns, so I only got differences in data type and the cardinality (number of unique values), as following: three columns ingested as integer and three columns ingested as text, in each case, selecting one column with very low cardinality (2-4 unique values), one with in-between cardinality (1k-3k unique values) and one with higher cardinality (16M unique values). 
+
+In addition, I also used one column ingested as TIMESTAMP (because its values in the CSV files are like `2018-07-28 00:00:00.000`), even though it is really a DATE column (and has 365 unique values). Of course, that's something that could have been fixed, but so far I have been using the defaults, including the data type detection. Similarly, the exercise includes no optimization whatsoever of the tables/queries (e.g. no partitions were defined for parquet files, no indexes created in PostgreSQL or DuckDB).
+
+The queries will be run using each of the datasets ingested in the previous post (tiny, small, mid and whole round data).
+
+# Who's good at counting?
+
+In a nutshell, DuckDB! 
+
+I ran benchmarks for the different combinations of backend, interface, group-columns and dataset, and in **most** of them, DuckDB completes the query faster, very closely followed by parquet (Arrow querying a parquet file). Arrow querying an arrow file is several times slower and seems to be also more variable in its performance. DuckDB querying the parquet file is also not as performant. The slowest, as expected, is PostgreSQL. 
+
+Below the plots summarizing the results of the benchmarks (using `{bench}` and its default `autoplot()`, with some tweaks). They all tell a similar story, so they are pooled together in the carousel below.
+
+```{r}
+bm_tiny_seq <-      backend_tar(agg_count_seq_.backend.tiny_data.txt)
+bm_tiny_product <-   backend_tar(agg_count_product_.backend.tiny_data.txt)
+bm_tiny_sex <-       backend_tar(agg_count_sex_.backend.tiny_data.txt)
+bm_tiny_code <-      backend_tar(agg_count_code_.backend.tiny_data.txt)
+bm_tiny_reg_type <- backend_tar(agg_count_reg_type_.backend.tiny_data.txt)
+bm_tiny_id_num <-    backend_tar(agg_count_id_num_.backend.tiny_data.txt)
+bm_tiny_sdate <-     backend_tar(agg_count_sdate_.backend.tiny_data.txt)
+
+bm_small_seq <-      backend_tar(agg_count_seq_.backend.small_data.txt)
+bm_small_product <-   backend_tar(agg_count_product_.backend.small_data.txt)
+bm_small_sex <-       backend_tar(agg_count_sex_.backend.small_data.txt)
+bm_small_code <-      backend_tar(agg_count_code_.backend.small_data.txt)
+bm_small_reg_type <- backend_tar(agg_count_reg_type_.backend.small_data.txt)
+bm_small_id_num <-    backend_tar(agg_count_id_num_.backend.small_data.txt)
+bm_small_sdate <-     backend_tar(agg_count_sdate_.backend.small_data.txt)
+
+bm_mid_seq <-      backend_tar(agg_count_seq_.backend.mid_data.txt)
+bm_mid_product <-   backend_tar(agg_count_product_.backend.mid_data.txt)
+bm_mid_sex <-       backend_tar(agg_count_sex_.backend.mid_data.txt)
+bm_mid_code <-      backend_tar(agg_count_code_.backend.mid_data.txt)
+bm_mid_reg_type <- backend_tar(agg_count_reg_type_.backend.mid_data.txt)
+bm_mid_id_num <-    backend_tar(agg_count_id_num_.backend.mid_data.txt)
+bm_mid_sdate <-     backend_tar(agg_count_sdate_.backend.mid_data.txt)
+
+bm_list_tiny <- list(
+  "  1M rows - int  -  20 uniq" = bm_tiny_seq, 
+  "  1M rows - text -  3k uniq" = bm_tiny_product, 
+  "  1M rows - text -   2 uniq" = bm_tiny_sex, 
+  "  1M rows - text - 10k uniq" = bm_tiny_code, 
+  "  1M rows - int  -   4 uniq" = bm_tiny_reg_type, 
+  "  1M rows - text -  8M uniq" = bm_tiny_id_num 
+  #"  1M rows - time - 365 uniq" = bm_tiny_sdate
+)
+
+bm_list_small <- list(
+  " 10M rows - int  -  20 uniq" = bm_small_seq, 
+  " 10M rows - text -  3k uniq" = bm_small_product, 
+  " 10M rows - text -   2 uniq" = bm_small_sex, 
+  " 10M rows - text - 10k uniq" = bm_small_code, 
+  " 10M rows - text -   4 uniq" = bm_small_reg_type, 
+  " 10M rows - text -  8M uniq" = bm_small_id_num
+  #" 10M rows - time - 365 uniq" = bm_small_sdate
+)
+
+bm_list_mid <- list(
+  " 70M rows - text -  20 uniq" = bm_mid_seq, 
+  " 70M rows - text -  3k uniq" = bm_mid_product, 
+  " 70M rows - text -   2 uniq" = bm_mid_sex, 
+  " 70M rows - text - 10k uniq" = bm_mid_code, 
+  " 70M rows - text -   4 uniq" = bm_mid_reg_type, 
+  " 70M rows - text -  8M uniq" = bm_mid_id_num
+  #" 70M rows - time - 365 uniq" = bm_mid_sdate
+)
+```
+
+```{r eval=FALSE}
+bench:::summary.bench_mark(bm_mid_cat1, relative = TRUE)
+```
+
+```{r}
+plots_list_tiny <- purrr::imap(bm_list_tiny, ~autoplot_bench(.x, .y))
+svg_list_tiny <- purrr::map(plots_list_tiny, ~svglite::xmlSVG(
+  code = show(.x), 
+  standalone = TRUE, 
+  height = 4.5, 
+  width = 4.5
+))
+plots_list_small <- purrr::imap(bm_list_small, ~autoplot_bench(.x, .y))
+svg_list_small <- purrr::map(plots_list_small, ~svglite::xmlSVG(
+  code = show(.x), 
+  standalone = TRUE, 
+  height = 4.5, 
+  width = 4.5
+))
+plots_list_mid <- purrr::imap(bm_list_mid, ~autoplot_bench(.x, .y))
+svg_list_mid <- purrr::map(plots_list_mid, ~svglite::xmlSVG(
+  code = show(.x), 
+  standalone = TRUE, 
+  height = 4.5, 
+  width = 4.5
+))
+slick_tiny <- slickR::slickR(svg_list_tiny, height = 400, width = "95%")
+slick_small <- slickR::slickR(svg_list_small, height = 400, width = "95%")
+slick_mid <- slickR::slickR(svg_list_mid, height = 400, width = "95%")
+slickR::slickR(svg_list_mid, height = 400, width = "95%") +
+  slickR::settings(dots = TRUE, autoplay = FALSE, autoplaySpeed = 1000)
+```
+
+And although DuckDB is most of the time the fastest, there is one notable exception: the TIMESTAMP column. When grouping by that column, DuckDB's performance degrades substantially and turns out to be several times slower than PostgreSQL.
+
+```{r}
+bm_list_time <- list(
+  " 70M rows - timestamp - 365 uniq" = bm_mid_sdate,
+  " 10M rows - timestamp - 365 uniq" = bm_small_sdate,
+  "  1M rows - timestamp - 365 uniq" = bm_tiny_sdate
+)
+
+plots_list_time <- purrr::imap(bm_list_time, ~autoplot_bench(.x, .y))
+svg_list_time <- purrr::map(plots_list_time, ~svglite::xmlSVG(
+  code = show(.x), 
+  standalone = TRUE, 
+  height = 4.5, 
+  width = 4.5
+))
+slickR::slickR(svg_list_time, height = 400, width = "95%") +
+  slickR::settings(dots = TRUE, autoplay = FALSE, autoplaySpeed = 1000)
+```
+
+Plots above show the results for tiny, small and mid data. Unfortunately, 
+it did not really work for the whole year data in the case of Arrow. Neither querying parquet nor arrow files. It crashed the R session again and again. I am not sure what is going on and did not have the time/was not in the mood to debug that. But it is worth noting that ["Grouped aggregation and (especially) joins should be considered somewhat experimental in this release. We expect them to work, but they may not be well optimized for all workloads."](https://arrow.apache.org/docs/r/news/index.html#arrow-6-0-1-2021-11-20). So let's just move on and run the benchmarks with the larger data using only DuckDB and PostgreSQL.
+
+Results, again, show DuckDB is way faster than Postgres for this kind of queries. For some queries it is 5x-7x faster, in others, up-to 25x faster. As examples, some queries that take ~25 seconds to complete with DuckDB, while taking more than 3 minutes in PostgreSQL.
+
+But the issue with the TIMESTAMP column persists and becomes actually super problematic in this larger dataset. PostgreSQL completes that query in about 5 minutes. But DuckDB takes almost 2 hours !!!
+
+```{r eval=FALSE}
+bench:::summary.bench_mark(bm_all_product, relative = TRUE)
+bench:::summary.bench_mark(bm_all_sdate, relative = TRUE)
+```
+
+```{r}
+bm_all_seq <-      backend_tar(agg_count_pgduck_seq)
+bm_all_product <-   backend_tar(agg_count_pgduck_product)
+bm_all_sex <-       backend_tar(agg_count_pgduck_sex)
+bm_all_code <-      backend_tar(agg_count_pgduck_code)
+bm_all_reg_type <- backend_tar(agg_count_pgduck_reg_type)
+bm_all_id_num <-    backend_tar(agg_count_pgduck_id_num)
+bm_all_sdate <-     backend_tar(agg_count_pgduck_sdate)
+
+bm_list_all <- list(
+  "500M rows - text -  3k uniq" = bm_all_product, 
+  "500M rows - integer -  5M uniq" = bm_all_seq, 
+  "500M rows - text -   2 uniq" = bm_all_sex, 
+  "500M rows - integer - 2k uniq" = bm_all_code, 
+  "500M rows - integer -   4 uniq" = bm_all_reg_type, 
+  "500M rows - text -  8M uniq" = bm_all_id_num,
+  "500M rows - timestamp - 365 uniq" = bm_all_sdate
+)
+
+plots_list_all <- purrr::imap(bm_list_all, ~autoplot_bench(.x, .y))
+svg_list_all <- purrr::map(plots_list_all, ~svglite::xmlSVG(
+  code = show(.x), 
+  standalone = TRUE, 
+  height = 4.5, 
+  width = 4.5
+))
+slickR::slickR(svg_list_all, height = 400, width = "95%") +
+  slickR::settings(dots = TRUE, autoplay = FALSE, autoplaySpeed = 1000)
+```
+
+Finally, as expected, neither the interface (dplyr/sql) nor collecting the data have an effect on query times that could change the ranking substantially. Those parameters can induce some differences in performance, in particular, when the result set is large, but overall, nothing to worry about.
+
+
+<details><summary>Session Info</summary>
+```{r}
+backend_tar(siu)
+```
+</details>
+
+
+# Wrap-up
+
+My take home messages
+
+- DuckDB is fast in these count aggregate queries.
+- Most of the time, Arrow querying a parquet file is as fast as DuckDB.
+- While Arrow is unbelievably fast to ingest the data in its native format 
+  (see previous post), querying that very same data is not that impressive.
+- Arrow could not handle the whole year data.
+- DuckDB querying parquet files works, but not as performant as querying data ingested into DuckDB. That's no surprise of course, but the performance penalty is substantial (and perhaps greater than I expected).
+- DuckDB has an issue with TIMESTAMP columns. I wonder if that was also the
+  underlying cause of the performance degradation in ingesting the data   
+  documented in the previous post.
+
+
+Some non-exaustive TODOs:
+
+- [ ] File an issue in DuckDB about the timestamp thing
+- [ ] See if that also happens with DATE
+- [ ] See if timestamp can be related to ingesting issues
+- [ ] Look closer into the Arrow - DuckDB integration. How does it work under the hood?, Can DuckDB also query files in arrow native format or only parquet?
+- [ ] ...
+
