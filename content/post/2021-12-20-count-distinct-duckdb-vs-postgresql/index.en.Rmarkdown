@@ -1,0 +1,180 @@
+---
+title: 'Count distinct: DuckDB vs. PostgreSQL'
+author: edalfon
+date: '2021-12-20'
+slug: count-distinct-duckdb-vs-postgresql
+categories:
+  - R
+tags:
+  - DuckDB
+  - PostgreSQL
+description: DuckDB around 10x-20x faster for count distinct queries
+image: /p/count-distinct-duckdb-vs-postgresql/index.en_files/figure-html/relative-times-plot-1.svg
+math: ~
+license: ~
+hidden: no
+comments: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, warning = FALSE, message = FALSE, error = TRUE,
+  include = TRUE, cache.comments = TRUE, cache = FALSE, fig.height = 4,
+  fig.width = 5
+)
+
+# knitr::opts_knit$set(upload.fun = knitr::imgur_upload)
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(targets)
+library(bench)
+
+#' Custom autoplot for a bench_mark object
+#'
+#' I just wanted to tweak some of the defaults for the autoplot
+#'
+#' @param .x a bench_mark object as returned by e.g. bench::mark()
+#'
+#' @return ggplot2 object
+autoplot_bench <- function(.x, title = "") {
+  autoplot(.x) +
+    scale_y_bench_time(
+      n.breaks = 50,
+      guide  = guide_axis(check.overlap = TRUE)
+    ) +
+    facet_null() +
+    #aes(color = collect_data) +
+    theme(legend.position = "none") + 
+    xlab(NULL) +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    ggtitle(title)
+}
+
+# let's read all targets and generate all the plots here
+count_distinct_targets <- 
+  # need to build the target_name from all the combinations of table and column
+  tidyr::expand_grid(
+    target_name = "count_distinct_pgduck",
+    table_name = c("tiny_data", "small_data", "mid_data", "year_data"),
+    cols = c("seq", "product", "sex", "code", "reg_type", "id_num", "sdate")
+  ) |>
+  unite("target_name", remove = FALSE) |> 
+  # and bring the data to put info about cardinality and data type
+  left_join(
+    y = readRDS("/E/MEGA/R/backend_compare/tables_cols_info.rds"),
+    by = c("table_name", "cols")
+  ) |> 
+  mutate(table_name_pretty = table_name |>
+    stringr::str_replace_all("_", " ") |>
+    stringr::str_to_title() |> 
+    factor(levels = c("Year Data", "Mid Data", "Small Data", "Tiny Data"))
+  ) |> 
+  mutate(Type = stringr::str_to_title(Type)) |> 
+  mutate(title = glue::glue("
+    {table_name_pretty} ~{nrows_str} rows
+    Column: {cols}
+    Cardinality: ~{cardinality_str} [{p_cardinality_str}]
+    Data Type: {Type}
+  ")) |> 
+  rowwise() |> 
+  mutate(tar_result = list(targets::tar_read_raw(
+    target_name, 
+    store = "/E/MEGA/R/backend_compare/_targets"
+  ))) |> 
+  mutate(bm_plot = list(autoplot_bench(tar_result, title))) |> 
+  mutate(bm_relative = list(
+    bench:::summary.bench_mark(tar_result, relative = TRUE)
+  )) |> 
+  mutate(relative_time = max(bm_relative$median))  |> 
+  mutate(whos_slower = names(bm_relative$expression)[
+    which.max(bm_relative$median)
+  ]) |> 
+  mutate(relative_time = case_when(
+    whos_slower == "duckdb" ~ relative_time * -1,
+    TRUE ~ relative_time
+  )) |> 
+  arrange(desc(nrows), desc(cardinality))
+```
+
+
+To continue the test-drive of DuckDB, now I'll try `count distinct`. Link to [first](/p/test-driving-duckdb-and-arrow) and [second](/p/count-aggregate-queries-on-duckdb-arrow-postgresql) posts for some context.
+
+# Count distinct benchmark
+
+This time it will be pretty straightforward[^noextra]. Just try this simple query on DuckDB and PostgreSQL, using the same data as before (tiny, small, mid and year), and try querying a few different columns that differ in cardinality and data type.
+
+[^noextra]: No comparisons for collecting or not the query results, neither for using dplyr/sql to interface with DuckDB and Postgres. This time is plain sql
+and also no comparisons for Arrow (until I checked why it did not really work 
+for the large dataset).
+
+```sql
+SELECT COUNT(DISTINCT(col)
+FROM table_name
+```
+
+# Results
+
+As expected, DuckDB is again consistently faster than Postgres in most queries,
+except for the timestamp columns, where there's a similar issue as the previous post and DuckDB ends up being slower than postgres. In this case, however, 
+the difference is not so big. 
+
+Here the plots summarizing the {bench}mark. 
+
+```{r bm-plots-carousel}
+count_distinct_targets$bm_plot |> 
+  purrr::map(~svglite::xmlSVG(
+    code = show(.x),
+    standalone = TRUE,
+    height = 4.5,
+    width = 4.5
+  )) |> 
+  slickR::slickR(height = 400, width = "95%") +
+  slickR::settings(dots = TRUE, autoplay = FALSE, autoplaySpeed = 1000)
+```
+
+There are eye-popping differences such as 3 minutes for DuckDB to complete the query vs. almost 2 hours for Postgres. The plot below summarizes all the benchmarks showing relative times [^relative] to see how much faster/slower can DuckDB be for this kind of queries. In most cases, DuckDB is between 10x and 20x times faster than postgres, and for high-cardinality columns, can be even faster than that. Nice!. DuckDB still struggles with timestamp columns as seen in the previous post, but for this kind of queries, it does not seem to be so problematic as it was for the count aggregate queries (here it is only 1x to 3x times slower than postgres).
+
+[^relative]: Comparing the median of the timings for each backend and expressing them relative to the faster backend.
+
+```{r relative-times-plot}
+#| out.width = "85%",
+#| fig.asp = 1/2.5,
+#| fig.width = 5,
+#| fig.align = 'center',
+#| dev = "svg"
+
+count_distinct_targets |>
+  # filter(table_name == "year_data") |>
+  ggplot(aes(
+    x = relative_time, y = reorder(cols, relative_time),
+    color = Type
+  )) +
+  geom_point(size = 1) +
+  geom_segment(size = 0.5, aes(
+    x = 0, xend = relative_time,
+    yend = reorder(cols, relative_time)
+  )) +
+  geom_vline(xintercept = 0) +
+  facet_grid(cols = vars(table_name_pretty)) + # scales = "free"
+  scale_x_continuous(
+    "DuckDB x times faster",
+    n.breaks = 5, labels = scales::comma_format(suffix = "x"),
+    expand = expansion(add = c(3, 0), mult = 0.05)
+  ) +
+  scale_color_manual(
+    "Data Type: ",
+    values = wesanderson::wes_palette("Zissou1", n = 5)[c(1, 5, 4)]
+  ) +
+  ylab("Column Name") +
+  ggthemes::theme_tufte(base_size = 8) +
+  theme(legend.position = "bottom") +
+  theme(panel.grid.major.y = element_blank()) +
+  theme(panel.grid.major.x = element_line(
+    linetype = "dotted", colour = "lightgrey"
+  )) 
+```
+
+
+
