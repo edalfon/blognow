@@ -110,7 +110,7 @@ and also no comparisons for Arrow (until I checked why it did not really work
 for the large dataset).
 
 ```sql
-SELECT COUNT(DISTINCT(col)
+SELECT COUNT(DISTINCT(col))
 FROM table_name
 ```
 
@@ -175,6 +175,3 @@ count_distinct_targets |>
     linetype = "dotted", colour = "lightgrey"
   )) 
 ```
-
-
-
