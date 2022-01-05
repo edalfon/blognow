@@ -50,7 +50,7 @@ frequent issues:
 
 ## Useful refs
 
-Just some links to follow, when you need to bruch up on these things
+Just some links to follow, when you need to brush up on these things
 
 - [The canonical / authoritative source](https://r4ds.had.co.nz/graphics-for-communication.html#figure-sizing)
 - [Well, the rmarkdown cookbook of course](https://bookdown.org/yihui/rmarkdown-cookbook/graphical-device.html)

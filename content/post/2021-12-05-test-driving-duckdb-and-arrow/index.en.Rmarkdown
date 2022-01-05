@@ -9,6 +9,7 @@ tags:
   - DuckDB
   - PostgreSQL
 slug: test-driving-duckdb-and-arrow
+description: Arrow is incredibly fast ingesting data into its native format
 image: https://i.imgur.com/OEagu52.png
 hidden: no
 comments: yes
@@ -121,15 +122,15 @@ terms of processing time [^nobenchmark].
 [^nobenchmark]: So this is not really a formal benchmark. Both DuckDB and Arrow
 have extensive testing and routinely benchmark their software, and this exercise by no means aims to oppose or replace that.
 
-I will use a few samples of a larger data set [^fulldata] that contains 25 columns (2 numeric, 2 timestamp, 10 integer and the rest text, most of them categorical variables, some with low cardinality -e.g. sex-, others with millions of different values). I will use one round of data (~500M rows) stored 
+I will use a few samples of a larger data set [^fulldata] that contains 25 columns (2 numeric, 2 timestamp, 10 integer and the rest text, most of them categorical variables, some with low cardinality -e.g. sex-, others with millions of different values). I will use one round of data (~486M rows) stored 
 in a csv file (uncompressed 82GB). First test in smaller samples (tiny, small, mid) before trying out using one whole round of data.
 
 [^fulldata]: The whole data comprise 12 csv files, each with 400M - 900M rows and uncompressed size between 50GB and 140GB.
 
 - Tiny data: 1M rows, csv uncompressed size ~170MB
 - Small data: 10M rows, csv uncompressed size ~1,7GB
-- Mid data: 70M rows, csv uncompressed size ~10GB
-- Round data: ~500M rows, csv uncompressed size ~82GB
+- Mid data: 60M rows, csv uncompressed size ~10GB
+- Round data: ~486M rows, csv uncompressed size ~82GB
 
 ## The code and software
 
@@ -299,7 +300,7 @@ bench:::summary.bench_mark(ingest_mid, relative = TRUE)
 
 ```{r}
 #| fig.align = "center"
-autoplot_bench(ingest_mid) + ggtitle("Mid data (70M rows)")
+autoplot_bench(ingest_mid) + ggtitle("Mid data (60M rows)")
 ```
 
 ```{r}
@@ -319,18 +320,19 @@ ingest_mid |>
 ```
 </details>
 
-The results ingesting a whole round of data [^nobench] (~500 million rows in a single csv file, 82GB) are mostly consistent with the times shown above for mid data; DuckDB took more than 5 hours to ingest the whole file, followed by PostgreSQL that took a bit less than 3 hours, followed by parquet that took about 1 hour and the fastest is, again, Arrow taking only a bit more than 16 minutes.
+The results ingesting a whole round of data [^nobench] (~486 million rows in a single csv file, 82GB) are mostly consistent with the times shown above for mid data; DuckDB took more than 5 hours to ingest the whole file, followed by PostgreSQL that took a bit less than 3 hours, followed by parquet that took about 1 hour and the fastest is, again, Arrow taking only a bit more than 16 minutes.
 
 [^nobench]: No `bench::mark()` here, though, 'cause it would have taken ~4-5 
 days to run. 
 
 ```{r out.width="40%"}
 tar_meta_all <- targets::tar_meta(
-  names = ends_with("_all"),
+  names = c("pg_all", "parquet_all", "arrow_all", "duckdb_all"),
   store = "/E/MEGA/R/backend_compare/_targets"
 )
 
 tar_meta_all |> 
+  arrange(seconds) |> 
   mutate(time = prettyunits::pretty_sec(seconds)) |> 
   select(name, seconds, time) |> 
   DT::datatable(

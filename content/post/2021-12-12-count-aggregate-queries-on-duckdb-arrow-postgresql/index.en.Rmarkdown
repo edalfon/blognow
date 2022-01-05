@@ -9,7 +9,7 @@ tags:
   - Arrow
   - DuckDB
   - PostgreSQL
-description: ~
+description: DuckDB for the win! Arrow querying parquet follows closely but choke on larger dataset
 image: https://i.imgur.com/ZTebbrF.png
 math: ~
 license: ~

@@ -9,6 +9,7 @@ tags:
   - DuckDB
   - PostgreSQL
 slug: test-driving-duckdb-and-arrow
+description: Arrow is incredibly fast ingesting data into its native format
 image: https://i.imgur.com/OEagu52.png
 hidden: no
 comments: yes
@@ -44,7 +45,7 @@ I’ve kept an eye on [DuckDB](https://duckdb.org/) and [Apache
 Arrow](https://arrow.apache.org/) as other open-source alternatives for the
 workflow outlined above. Both share a number of features that make them very
 appealing for analytical workloads in general, and for the in-laptop-analytics
-in particular:[^2]
+in particular [^2]:
 
 -   Columnar format and vectorized operations
 -   In-process libraries (no need to install a server)
@@ -88,15 +89,15 @@ data set publicly available. But that would have been missing the point. I
 wanted to keep this exercise as close as possible to an actual use case for me.
 After all, this is just an informal test to see how to integrate DuckDB and/or
 Arrow in my workflow and to assess the potential benefits, for example, in
-terms of processing time.[^3]
+terms of processing time [^3].
 
-I will use a few samples of a larger data set[^4] that contains 25 columns (2 numeric, 2 timestamp, 10 integer and the rest text, most of them categorical variables, some with low cardinality -e.g. sex-, others with millions of different values). I will use one round of data (\~500M rows) stored
+I will use a few samples of a larger data set [^4] that contains 25 columns (2 numeric, 2 timestamp, 10 integer and the rest text, most of them categorical variables, some with low cardinality -e.g. sex-, others with millions of different values). I will use one round of data (\~486M rows) stored
 in a csv file (uncompressed 82GB). First test in smaller samples (tiny, small, mid) before trying out using one whole round of data.
 
 -   Tiny data: 1M rows, csv uncompressed size \~170MB
 -   Small data: 10M rows, csv uncompressed size \~1,7GB
--   Mid data: 70M rows, csv uncompressed size \~10GB
--   Round data: \~500M rows, csv uncompressed size \~82GB
+-   Mid data: 60M rows, csv uncompressed size \~10GB
+-   Round data: \~486M rows, csv uncompressed size \~82GB
 
 ## The code and software
 
@@ -222,7 +223,7 @@ Well, for this exercise Arrow is fast!, way faster than Postgres, but also faste
 
 There are no major differences associated to the approach used to ingest in each backend (so, no major overhead for auto-detecting file format and data types in DuckDB).
 
-<img src="https://i.imgur.com/7hv8LK1.png" width="50%" /><img src="https://i.imgur.com/WkXDiHs.png" width="50%" />
+<img src="https://i.imgur.com/5kk9tLQ.png" width="50%" /><img src="https://i.imgur.com/1miXWBN.png" width="50%" />
 
 <details>
 <summary>
@@ -906,7 +907,7 @@ NULL
 Interestingly, when the data are somewhat larger, at some point DuckDB’s performance degrades and falls behind Postgres. While the other relative times
 remain in the same ballpark (1.6x parquet, \~12x Postgres), now it takes almost 25x longer for DuckDB to ingest the data, compared to arrow. In absolute numbers, while Arrow takes less than 2 minutes to ingest the data, DuckDB takes about 40 minutes (and Postgres less than 20 minutes).
 
-<img src="https://i.imgur.com/KsHzH1A.png" width="480" style="display: block; margin: auto;" />
+<img src="https://i.imgur.com/C6sA4Xj.png" width="480" style="display: block; margin: auto;" />
 
 <table class=" lightable-paper" style="font-family: &quot;Arial Narrow&quot;, arial, helvetica, sans-serif; width: auto !important; margin-left: auto; margin-right: auto;">
 <thead>
@@ -1414,10 +1415,10 @@ NULL
 </table>
 </details>
 
-The results ingesting a whole round of data[^5] (\~500 million rows in a single csv file, 82GB) are mostly consistent with the times shown above for mid data; DuckDB took more than 5 hours to ingest the whole file, followed by PostgreSQL that took a bit less than 3 hours, followed by parquet that took about 1 hour and the fastest is, again, Arrow taking only a bit more than 16 minutes.
+The results ingesting a whole round of data [^5] (\~486 million rows in a single csv file, 82GB) are mostly consistent with the times shown above for mid data; DuckDB took more than 5 hours to ingest the whole file, followed by PostgreSQL that took a bit less than 3 hours, followed by parquet that took about 1 hour and the fastest is, again, Arrow taking only a bit more than 16 minutes.
 
 <div id="htmlwidget-1" style="width:100%;height:auto;" class="datatables html-widget"></div>
-<script type="application/json" data-for="htmlwidget-1">{"x":{"filter":"none","vertical":false,"fillContainer":false,"data":[["1","2","3","4"],["duckdb_all","pg_all","parquet_all","arrow_all"],[19481.56,9967.75,3916.28,986.55],["5h 24m 41.6s","2h 46m 7.8s","1h 5m 16.3s","16m 26.5s"]],"container":"<table class=\"display cell-border responsive nowrap compact\">\n  <thead>\n    <tr>\n      <th> <\/th>\n      <th>name<\/th>\n      <th>seconds<\/th>\n      <th>time<\/th>\n    <\/tr>\n  <\/thead>\n<\/table>","options":{"dom":"t","columnDefs":[{"visible":false,"targets":2},{"className":"dt-right","targets":2},{"orderable":false,"targets":0}],"order":[],"autoWidth":false,"orderClasses":false,"rowCallback":"function(row, data, displayNum, displayIndex, dataIndex) {\nvar value=data[2]; $(this.api().cell(row, 3).node()).css({'background':isNaN(parseFloat(value)) || value <= 0.000000 ? '' : 'linear-gradient(-90.000000deg, transparent ' + Math.max(19481.560000 - value, 0)/19481.560000 * 100 + '%, deepskyblue ' + Math.max(19481.560000 - value, 0)/19481.560000 * 100 + '%)'});\n}"}},"evals":["options.rowCallback"],"jsHooks":[]}</script>
+<script type="application/json" data-for="htmlwidget-1">{"x":{"filter":"none","vertical":false,"fillContainer":false,"data":[["1","2","3","4"],["arrow_all","parquet_all","pg_all","duckdb_all"],[986.55,3916.28,9967.75,21377.3],["16m 26.5s","1h 5m 16.3s","2h 46m 7.8s","5h 56m 17.3s"]],"container":"<table class=\"display cell-border responsive nowrap compact\">\n  <thead>\n    <tr>\n      <th> <\/th>\n      <th>name<\/th>\n      <th>seconds<\/th>\n      <th>time<\/th>\n    <\/tr>\n  <\/thead>\n<\/table>","options":{"dom":"t","columnDefs":[{"visible":false,"targets":2},{"className":"dt-right","targets":2},{"orderable":false,"targets":0}],"order":[],"autoWidth":false,"orderClasses":false,"rowCallback":"function(row, data, displayNum, displayIndex, dataIndex) {\nvar value=data[2]; $(this.api().cell(row, 3).node()).css({'background':isNaN(parseFloat(value)) || value <= 0.000000 ? '' : 'linear-gradient(-90.000000deg, transparent ' + Math.max(21377.300000 - value, 0)/21377.300000 * 100 + '%, deepskyblue ' + Math.max(21377.300000 - value, 0)/21377.300000 * 100 + '%)'});\n}"}},"evals":["options.rowCallback"],"jsHooks":[]}</script>
 
 <br>
 
@@ -1443,8 +1444,8 @@ Session Info
     ## [1] stats     graphics  grDevices utils     datasets  methods   base     
     ## 
     ## other attached packages:
-    ##  [1] conflicted_1.0.4  tarchetypes_0.3.2 targets_0.9.0     odbc_1.3.2       
-    ##  [5] arrow_6.0.0.2     duckdb_0.3.0      DBI_1.1.1         ggplot2_3.3.5    
+    ##  [1] conflicted_1.0.4  tarchetypes_0.4.0 targets_0.9.0     odbc_1.3.2       
+    ##  [5] arrow_6.0.0.2     duckdb_0.3.0      DBI_1.1.2         ggplot2_3.3.5    
     ##  [9] tidyr_1.1.4       dplyr_1.0.7       magrittr_2.0.1   
     ## 
     ## loaded via a namespace (and not attached):
