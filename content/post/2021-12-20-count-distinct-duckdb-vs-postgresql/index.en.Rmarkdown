@@ -175,3 +175,16 @@ count_distinct_targets |>
     linetype = "dotted", colour = "lightgrey"
   )) 
 ```
+
+
+# Wrap-up
+
+Some non-exaustive TODOs:
+
+- [ ] I see DuckDB has native support to count distinct elements using 
+HyperLogLog 
+(see [`approx_count_distinct(x)`](https://duckdb.org/docs/sql/aggregates))
+That's cool!. In Postgres there's certainly an [extension](https://github.com/citusdata/postgresql-hll) for that (also this [post](https://www.citusdata.com/blog/2017/06/30/efficient-rollup-with-hyperloglog-on-postgres/)). I've use it before (rarely, though, as most of the time I do need exact counts), so it's nice to have it in DuckDB readily available!. Perhaps try it out sometime.
+
+- [ ] ...
+
