@@ -7,7 +7,7 @@ categories:
   - R
 tags:
   - blogdown
-description: ~
+description: still need to bring older posts here!
 image: https://i.imgur.com/lsjJif9h.png
 math: yes
 license: ~
@@ -78,7 +78,6 @@ ggplot(diamonds, aes(x = cut, fill = clarity)) +
 For this to work, you gotta set `unsafe: true` in the `config.yaml`.
 
 ```yaml
-
 markup:
     goldmark:
         renderer:
@@ -117,10 +116,20 @@ visNetwork(nodes, edges, height = "500px", width = "100%") %>%
 **TODO**: DT does not seem to be working
 
 ```{r}
-DT::datatable(mtcars)
+mtcars |> 
+  DT::datatable(
+    escape = FALSE,
+    class = "display cell-border responsive nowrap compact",
+    options = list(
+      dom = 't',
+      columnDefs = list(list(visible=FALSE, targets=c(2)))
+    ),
+    fillContainer = FALSE
+  ) 
 ```
 
 Let's see later what is going on. (Clash with other widgets in this page?)
+
 
 ## `{plotly}`
 
