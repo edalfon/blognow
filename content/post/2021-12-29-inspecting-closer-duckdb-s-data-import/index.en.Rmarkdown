@@ -1,0 +1,473 @@
+---
+title: A second look at DuckDB's data ingestion
+author: edalfon
+date: '2021-12-29'
+categories:
+  - R
+  - Python
+tags:
+  - DuckDB
+slug: inspecting-closer-duckdb-s-data-import
+hidden: no
+comments: yes
+image: /p/inspecting-closer-duckdb-s-data-import/index.en_files/figure-html/recap-plot-1.svg
+description: Cleaning-up seems to be the underlying issue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE, warning = FALSE, message = FALSE, error = TRUE,
+  include = TRUE, cache.comments = TRUE, cache = FALSE, fig.height = 4,
+  fig.width = 5
+)
+
+# knitr::opts_knit$set(upload.fun = knitr::imgur_upload)
+
+library(targets)
+backend_tar <- function(.x) {
+  targets::tar_read_raw(
+    name = deparse(substitute(.x)),
+    store = "/E/MEGA/R/backend_compare/_targets"
+  )
+}
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+#' Custom plot for a microbenchmark object
+#'
+#' I just wanted to tweak some of the defaults for the autoplot
+#'
+#' @param .x a microbenchmark object as returned by e.g. microbenchmark()
+#'
+#' @return ggplot2 object
+autoplot_bench <- function(.x, title = "") {
+  
+  .x |>
+    as.data.frame() |>
+    mutate(time = time / 1e9) |> 
+    ggplot(aes(x = time, y = expr, grouponX = FALSE)) +
+    ggbeeswarm::geom_beeswarm(groupOnX = FALSE, cex = 2) +
+    scale_x_continuous(
+      labels = ~prettyunits::pretty_sec(.x, compact = TRUE), 
+      n.breaks = 10, 
+      guide  = guide_axis(check.overlap = TRUE)
+    ) +
+    ylab(NULL) +
+    theme(plot.title = element_text(hjust = 0.5)) +
+    ggtitle(title)
+}
+```
+
+In the [first post](/p/test-driving-duckdb-and-arrow) of this (already
+a) series, there was some performance degradation ingesting larger files
+into DuckDB. For larger csv files, DuckDB ended up being \~2x slower
+than Postgres, even though it was \~4x-5x faster in the somewhat smaller
+files. 
+
+So let's take a closer look and try a couple of things to dx the
+issue.
+
+-   Read more carefully the docs/source code
+-   Try DuckDB's latest version 0.3.1
+-   Try in not-so-poorman's laptop
+-   Is it related to the timestamp issue?
+-   Take a look at query plan and profiling info.
+
+# Recap
+
+The figure below summarizes the findings of the first post, showing how many 
+seconds it takes to ingest 1 million rows using each backend and data size (tiny, small, mid, year). There is evidently a sizeable performance degradation in DuckDB moving from small data (~10M rows) to mid data (~60M rows). While the performance of postgres, for example, remains stable around 20 secs per million rows ingested, in the case of DuckDB, it jumps from ~8 secs to more than 40 secs per million rows ingested, resulting in a whooping ~6hours to ingest ~483M rows (year data).
+
+```{r recap-plot, fig.align='center', dev='svg'}
+# fig.asp=0.57
+#| out.width="75%"
+ingest_tiny <- backend_tar(bench_ingest_tar_.backend.tiny_data.txt)
+ingest_small <- backend_tar(bench_ingest_tar_.backend.small_data.txt)
+ingest_mid <- backend_tar(bench_ingest_tar_.backend.mid_data.txt)
+
+original_times <- 
+  dplyr::bind_rows(
+    tibble(
+      time = ingest_tiny$time, 
+      expr = ingest_tiny$expression, 
+      table_name = "tiny_data"
+    ),
+    tibble(
+      time = ingest_small$time, 
+      expr = ingest_small$expression, 
+      table_name = "small_data"
+    ), 
+    tibble(
+      time = ingest_mid$time, 
+      expr = ingest_mid$expression, 
+      table_name = "mid_data"
+    )
+  ) |> 
+  tidyr::unnest(time) |> 
+  mutate(expr = as.character(expr)) |> 
+  mutate(time = as.numeric(time)) |> 
+  bind_rows(
+    targets::tar_meta(
+      names = c("pg_all", "parquet_all", "arrow_all", "duckdb_all"),
+      store = "/E/MEGA/R/backend_compare/_targets"
+    ) |> 
+      select(expr = name, time = seconds) |> 
+      mutate(table_name = "year_data")
+  ) |> 
+  mutate(expr = stringr::str_extract(expr, "duckdb|pg|arrow|parquet")) |> 
+  left_join(
+    y = readRDS("/E/MEGA/R/backend_compare/data_info.rds"),
+    by = "table_name"
+  ) |> 
+  mutate(title = stringr::str_replace(title, "\\(", "\n\\(")) |> 
+  mutate(speed = nrows / time) |> 
+  mutate(secs_1mrows = 1e6 * time / nrows) 
+
+median_times <- original_times |> 
+  group_by(table_name, expr) |> 
+  summarize(time = median(time)) |> 
+  left_join(
+    y = readRDS("/E/MEGA/R/backend_compare/data_info.rds"),
+    by = "table_name"
+  ) |> 
+  mutate(title = stringr::str_replace(title, "\\(", "\n\\(")) |> 
+  mutate(speed = nrows / time) |> 
+  mutate(secs_1mrows = 1e6 * time / nrows) 
+
+median_times |>
+  ggplot(aes(x = reorder(title, nrows), y = secs_1mrows, color = expr)) +
+  ggbeeswarm::geom_beeswarm(
+    groupOnX = TRUE, cex = 0.85, alpha = 0.3, data = original_times
+  ) +
+  geom_point(size = 3) +
+  geom_line(aes(group = expr)) +
+  scale_y_continuous("Seconds per 1 Million rows ingested",
+    labels = scales::comma
+  ) +
+  scale_x_discrete(NULL, expand = expansion(add = 0.9)) +
+  ggthemes::theme_tufte() +
+  theme(panel.grid.major.y = element_blank()) +
+  theme(panel.grid.major.y = element_line(
+    linetype = "dotted", colour = "lightgrey"
+  )) +
+  directlabels::geom_dl(aes(label = expr), 
+    method = list("first.points", rot = 0, fontface="bold", hjust = 1.1)
+  ) +
+  directlabels::geom_dl(aes(label = expr),
+    method = list("last.points", rot = 0, fontface="bold", hjust = -0.1)
+  ) +
+  scale_color_manual(
+    values = c("#00AFBB", "#52854C", "#FC4E07", "#4E84C4"), 
+    guide = NULL
+  )
+```
+
+So, what is going on?
+
+# Any clue in the docs?
+
+Taking a closer look at the [read_csv](https://duckdb.org/docs/data/csv)
+and [copy](https://duckdb.org/docs/sql/statements/copy.html) docs,
+I cannot find an evident reason for the slow-down / nor there seems to be
+any promising argument to tweak. Of course, choosing optimal data types
+could help (using, for example,
+[enum](https://duckdb.org/docs/sql/data_types/enum), or casting to date columns loaded as timestamp), but I'll leave that for other
+time.
+
+Perhaps tweaking DuckDB's config parameters (see
+[configuration](<https://duckdb.org/docs/sql/configuration>) and
+[pragmas](https://duckdb.org/docs/sql/pragmas)) such as threads, memory_limit or checkpoint_threshold, wal_autocheckpoint could help. Not sure though if the threads arg applies for multi-threading read the csv, or it's only for the query engine once the data are already in DuckDB.
+
+Quickly browsing the source code, the only hint I get is that DuckDB uses chunks of 1024 rows, and that may have something to do with it. But this argument is not exposed in the read_csv (only sample_size is exposed, but it only applies to the sample used for automatic detection of delimiter, data type and so on) or pragmas.
+
+So, I am still kind of clueless about what is going on. So let's try couple of things.
+
+# DuckDB latest version and other laptop
+
+Originally the test in the [first post](/p/test-driving-duckdb-and-arrow) ran using DuckDB 0.3, but
+0.3.1 is already available. In addition, it also ran on a very old laptop. So let's also try in a not-so-old laptop [^no-high-end-though] using the latest available version of DuckDB. The figure below summarizes the results and shows:
+
+i) Roughly similar times (in poorman's laptop) as the original exercise, so no major differences due to DuckDB's version.
+ii) Running the thing in a not-so-poor laptop helps; it's faster overall, and the performance degradation occurs mostly in the year data, and not right away in the mid data, as in the poorman's laptop.
+iii) But performance degradation is still there. So, it does not seem that old-hardware or outdated version of DuckDB are the main causes.
+
+[^no-high-end-though]: Not a high-end device, though. i7-7500U, 32GB DDR-4 and a somewhat faster SSD drive (but still SATA). Also, it does not have much disk space available, so I had to put the raw data in an usb.
+
+```{r duck031-plot, fig.align='center', dev='svg'}
+# fig.asp=0.57
+#| out.width="75%"
+
+ingest_tars <- 
+  targets::tar_meta(
+    names = c(
+      #"duckdb_all",
+      starts_with("ingest_duck031"), 
+      starts_with("ingest_clean_slate"),
+      NULL
+    ),
+    store = "/E/MEGA/R/backend_compare/_targets"
+  ) |> 
+  select(name, seconds) |> 
+  drop_na() |> 
+  mutate(table_name = name |>
+    stringr::str_extract("tiny_data|small_data|mid_data|year_data") |> 
+    replace_na("year_data")
+  ) |> 
+  mutate(laptop = name |> 
+    stringr::str_extract("_D..|_.backend.|duckdb_all") |> 
+    recode("_D.." = "Not-so-poor", 
+           "_.backend." = "Poorman's laptop", 
+           "duckdb_all" = "Poorman's laptop")
+  ) |> 
+  left_join(
+    y = readRDS("/E/MEGA/R/backend_compare/data_info.rds"),
+    by = "table_name"
+  ) |> 
+  mutate(title = stringr::str_replace(title, "\\(", "\n\\(")) |>   
+  mutate(speed = nrows / seconds) |> 
+  mutate(secs_1mrows = 1e6 * seconds / nrows) 
+
+
+ingest_tars_medians <- ingest_tars |>
+  group_by(table_name, laptop) |>
+  summarise(secs_1mrows = median(secs_1mrows)) |> 
+  left_join(
+    y = readRDS("/E/MEGA/R/backend_compare/data_info.rds"),
+    by = "table_name"
+  ) |> 
+  mutate(title = stringr::str_replace(title, "\\(", "\n\\("))
+
+#plotly::ggplotly(
+ingest_tars_medians |> 
+  ggplot(aes(x = reorder(title, nrows), y = secs_1mrows, color = laptop)) +
+  geom_point(size = 3) +
+  #geom_col(position = "dodge")
+  geom_line(aes(group = laptop)) +
+  #facet_grid(cols = vars(laptop)) +
+  ggbeeswarm::geom_beeswarm(
+    groupOnX = TRUE, cex = 2, alpha = 0.3, data = ingest_tars
+  ) +
+  scale_y_continuous("Seconds per 1 Million rows ingested",
+    labels = scales::comma
+  ) +
+  scale_x_discrete(NULL, expand = expansion(add = c(0, 2))) +
+  ggthemes::theme_tufte() +
+  theme(panel.grid.major.y = element_blank()) +
+  theme(panel.grid.major.y = element_line(
+    linetype = "dotted", colour = "lightgrey"
+  )) +
+  directlabels::geom_dl(aes(label = laptop),
+    method = list("last.points", rot = 0, fontface="bold", hjust = -0.1)
+  ) +
+  scale_color_manual(
+    values = c("#009E73", "#D55E00"), 
+    guide = NULL
+  )
+#)
+```
+
+# Is it the timestamp issue?
+
+In the [second](/p/count-aggregate-queries-on-duckdb-arrow-postgresql) and [third](/p/count-distinct-duckdb-vs-postgresql) posts of this series, an issue with timestamp columns came up; count aggregate queries on timestamp columns were way slower than other data types (and ended up being slower than postgres as well). So I wonder if that may have to do with the performance degradation observed ingesting the data. To check this, I tried comparing auto-detect, explicitly ingesting those columns as timestamp and ingesting those columns as varchar, so they are stored like any other text. The figure below shows the results: long story short, the timestamp issue does not seem to have anything to do with the performance drop ingesting the data. In fact, it actually helps ingesting as timestamp compared to ingesting as text (which is expected, because the timestamp has an underlying numeric representation).
+
+```{r bm-date-plots-carousel}
+ingest_date_targets <- 
+  data.frame(src_file = c(
+    tiny = "/backend/tiny_data.txt",
+    small = "/backend/small_data.txt",
+    mid = "/backend/mid_data.txt"
+  )) |> 
+  mutate(table_name = stringr::str_extract(
+    src_file, "tiny_data|small_data|mid_data"
+  )) |> 
+  left_join(
+    y = readRDS("/E/MEGA/R/backend_compare/data_info.rds"),
+    by = "table_name"
+  ) |> 
+  rowwise() |> 
+  mutate(tar_result = list(tar_read_raw(
+    name = make.names(paste0("bench_ingest_duckdb_date_tar_", src_file)),
+    store = "/E/MEGA/R/backend_compare/_targets"
+  ))) |>
+  mutate(bm_plot = list(autoplot_bench(tar_result, title))) 
+
+
+ingest_date_targets$bm_plot |> 
+  purrr::map(~svglite::xmlSVG(
+    code = show(.x),
+    standalone = TRUE,
+    height = 4.5,
+    width = 4.5
+  )) |> 
+  slickR::slickR(height = 400, width = "95%") +
+  slickR::settings(dots = TRUE, autoplay = FALSE, autoplaySpeed = 1000)
+```
+
+# Query plan and profiling info
+
+The query execution plan is key to understand the performance of a SQL query and the first step to try and optimize it. `EXPLAIN` and `EXPLAIN ANALYZE` are your best friends. But for this particular case, I did not think it was actually useful. After all, it should be a pretty straightforward query plan: a sequential scan of the csv file and dump that data into DuckDB's data structures. But let's try anyway.
+
+[DuckDB supports the explain statement](https://duckdb.org/dev/profiling)[^python-here].
+
+[^python-here]: I have been running all this from R, mostly using the `{DBI}`
+package to interact with DuckDB. But, ["by default, profiling information is printed to the console"](https://duckdb.org/docs/sql/pragmas) and it seems `{DBI}` does not capture that at all. You can also send profiling info to a file, but, it's seems just easier to use python here.
+
+```{python}
+#| echo=TRUE,
+import duckdb
+con = duckdb.connect(database = '/backend/duckdb/backend.duckdb')
+drop_res = con.execute("DROP TABLE IF EXISTS tmp;")
+print(con.execute("""
+  EXPLAIN 
+  CREATE TABLE tmp AS 
+  SELECT * 
+  FROM read_csv_auto('D:/tiny_data.txt')
+  ;
+""").fetchall()[0][1])
+con.close()
+```
+And as expected, nothing really useful here.
+
+For the ["run-time profiling"](https://duckdb.org/dev/profiling#run-time-profiling) -similar to Postgres' EXPLAIN ANALYZE-, you need to enable that via `PRAGMA` statement (`PRAGMA enable_profiling;`).
+
+```{python}
+#| echo=TRUE,
+#| results='hide'
+import duckdb
+con = duckdb.connect(database = '/backend/duckdb/backend.duckdb')
+drop_res = con.execute("DROP TABLE IF EXISTS tmp;")
+con.execute("""
+  PRAGMA enable_profiling;
+  CREATE TABLE tmp AS 
+  SELECT * 
+  FROM read_csv_auto('D:/tiny_data.txt')
+  ;
+""")
+con.close()
+```
+```
+┌─────────────────────────────────────┐
+│┌───────────────────────────────────┐│
+││    Query Profiling Information    ││
+│└───────────────────────────────────┘│
+└─────────────────────────────────────┘
+   PRAGMA enable_profiling;   CREATE TABLE tmp AS    SELECT *    FROM read_csv_auto('D:/tiny_data.txt')   ; 
+┌─────────────────────────────────────┐
+│┌───────────────────────────────────┐│
+││         Total Time: 2.00s         ││
+│└───────────────────────────────────┘│
+└─────────────────────────────────────┘
+┌───────────────────────────┐
+│      CREATE_TABLE_AS      │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+│             1             │
+│          (0.82s)          │
+└─────────────┬─────────────┘                             
+┌─────────────┴─────────────┐
+│       READ_CSV_AUTO       │
+│   ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+│           999999          │
+│          (1.17s)          │
+└───────────────────────────┘                             
+```
+
+```{python}
+#| echo=FALSE,
+#| results="asis",
+#| eval=FALSE
+import duckdb_query_graph
+duckdb_query_graph.generate_ipython('/backend/p_20220122162459.json')
+```
+
+Ok, that can be interesting. You can see which operator (create_table, read_csv) takes more time, and compare the total time measured by the profiler with the observed time used so far -elapsed time between sending the query until it returns control to the caller-. 
+
+Taking a look at the profiling information for the combinations of data/laptop,
+the read_csv operator takes most of the time. But the interesting part is that the total time reported in the profiling information is always greater than the time experienced by the client. And that seems to explain the performance degradation (see figure below). The time reported by the profiler remains relatively stable as the data size increases, while the time the client actually has to wait before DuckDB returning control, as seen before, skyrockets after some data size threshold.
+
+So it seems to be the cleanup work that takes much longer for larger datasets. Apparently DuckDB finishes reading and ingesting the data, then it goes ahead and writes the profiling file, but keeps busy cleaning up after itself, removing temporary files[^tempfiles] and so on. For the year data in the poorman's laptop, that means reading and creating the table take about 1.5 hours, but the whole process until DuckDB is done, takes almost 6 hours!.
+
+[^tempfiles]: In one of those lengthy runs, the laptop restarted half-way and there were almost 1 million temp files (256k size). Just deleting them takes quite some time. That's why I think that's what's keeping DuckDB busy.
+
+
+```{r}
+prof_times <- read.delim("/E/MEGA/R/backend_compare/profiling_times.txt") |> 
+  left_join(
+    y = readRDS("/E/MEGA/R/backend_compare/data_info.rds"),
+    by = "table_name"
+  ) |> 
+  mutate(title = stringr::str_replace(title, "\\(", "\n\\(")) 
+```
+
+```{r eval=FALSE, include=FALSE}
+prof_times |> 
+  tibble::rownames_to_column() |> 
+  select(rowname, laptop, title, create_table_as, read_csv) |> 
+  pivot_longer(c(create_table_as, read_csv)) |> 
+  group_by(rowname) |> 
+  mutate(per = value / sum(value)) |> View()
+  ggplot(aes(x = rowname, y = per, fill = name)) +
+  geom_bar(stat = "identity", position = position_stack()) +
+  facet_wrap(vars(title), scales = "free")
+```
+
+
+```{r profiling-plot, fig.align='center', dev='svg'}
+#| fig.asp=400/900,
+#| fig.width=8.5,
+#| out.width="95%"
+prof_times_points <- prof_times |> 
+  select(laptop, title, total, real_total, nrows) |> 
+  pivot_longer(c(total, real_total)) |> 
+  mutate(time_type = recode(name, 
+                       "total" = "Profiling\ntime",
+                       "real_total" = "Observed\ntime")) |> 
+  mutate(pace = 1e6 * value / nrows)
+
+prof_times_medians <- prof_times_points |> 
+  group_by(laptop, title, time_type, nrows) |> 
+  summarize(pace = median(pace))
+
+prof_times_medians |> 
+  ggplot(aes(x = reorder(title, nrows), y = pace, color = time_type)) +
+  geom_point(size = 3) +
+  #geom_col(position = "dodge")
+  geom_line(aes(group = time_type)) +
+  ggbeeswarm::geom_beeswarm(
+    groupOnX = TRUE, cex = 2, alpha = 0.3, data = prof_times_points
+  ) +
+  facet_grid(cols = vars(laptop)) +
+  scale_y_continuous("Seconds per 1 Million rows ingested",
+    labels = scales::comma
+  ) +
+  scale_x_discrete(NULL, expand = expansion(add = c(0, 2))) +
+  ggthemes::theme_tufte() +
+  theme(panel.grid.major.y = element_blank()) +
+  theme(panel.grid.major.y = element_line(
+    linetype = "dotted", colour = "lightgrey"
+  )) +
+  directlabels::geom_dl(aes(label = time_type),
+    method = list("last.points", rot = 0, fontface="bold", hjust = -0.1)
+  ) +
+  scale_color_manual(
+    values = c("#CD2626", "#1874CD"), 
+    guide = NULL
+  )
+```
+
+
+# Wrap-up
+
+My take home messages
+
+- Clean-up work seems to be the root of the performance degradation. That may involve removing temp files or moving data from WAL to the final DuckDB file. I wonder if there is an equivalent in DuckDB to the UNLOGGED table in postgres.
+- 
+
+Some non-exaustive TODOs:
+
+- [X] Set optimal data types for all columns (including using ENUM)
+- [ ] ...
+
+
+
