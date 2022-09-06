@@ -9,7 +9,7 @@ tags:
   - geomtextpath
   - ggplot2
 description: ~
-image: https://i.imgur.com/5N3YjNz.png
+image: https://i.imgur.com/gXeTiYX.png
 math: ~
 license: ~
 hidden: no
