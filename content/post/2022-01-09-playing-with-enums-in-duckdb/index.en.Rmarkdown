@@ -1,0 +1,264 @@
+---
+title: Playing with Enums in DuckDB
+author: edalfon
+date: '2022-01-09'
+slug: playing-with-enums-in-duckdb
+categories:
+  - R
+tags:
+  - DuckDB
+description: Do use ENUM to get your data into DuckDB
+image: /p/playing-with-enums-in-duckdb/index.en_files/figure-html/enum-res-plot-1.svg
+math: ~
+license: ~
+hidden: no
+comments: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, warning = FALSE, message = FALSE, error = TRUE,
+  include = TRUE, cache.comments = TRUE, cache = FALSE, fig.height = 4,
+  fig.width = 5
+)
+
+# efun::time_chunk(all = TRUE)
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(targets)
+
+```
+
+Now, let's try DuckDB's ENUM type. Since they announced this feature, I wanted to try it out, because most of the datasets I have to deal with have a bunch of string columns, frequently, low-cardinality categorical variables. So I would expect substantial gains in query performance and database size, by using enums. For reference, here links to the [blog post](https://duckdb.org/2021/11/26/duck-enum.html) and [documentation](https://duckdb.org/docs/sql/data_types/enum) describing enums.
+
+```{r echo=FALSE}
+duckdb_con <- DBI::dbConnect(duckdb::duckdb("/backend/duckdb/backend.duckdb"))
+#on.exit(DBI::dbDisconnect(duckdb_con, shutdown = TRUE))
+```
+
+```{sql connection="duckdb_con", echo=FALSE}
+DROP TABLE IF EXISTS tiny_data;
+```
+
+```{sql connection="duckdb_con", echo=FALSE}
+CREATE TABLE tiny_data AS
+SELECT *
+FROM read_csv_auto('D:/tiny_data.txt')
+;
+```
+
+```{sql connection="duckdb_con", results='hide', include=FALSE}
+PRAGMA show_tables;
+```
+
+Once again, DuckDB follows PostgreSQL's syntax.
+
+```{sql connection="duckdb_con", echo=FALSE}
+DROP TYPE IF EXISTS sex_enum CASCADE;
+```
+
+```{sql connection="duckdb_con"}
+CREATE TYPE sex_enum AS ENUM ('F', 'M');
+```
+
+After creating the enum type, you can use it as other built-in types, 
+for example, to cast a column into the new type.
+
+```{sql connection="duckdb_con"}
+SELECT sex::sex_enum FROM tiny_data LIMIT 10;
+```
+
+But it seems you cannot simply change a column's type and make it an enum, using an ALTER TABLE statement. None of the statements below work for enums as the target data type, but they would work for varchar as the target data type.
+
+```{sql connection = "duckdb_con", error = TRUE}
+ALTER TABLE tiny_data ALTER sex TYPE sex_enum;
+```
+
+```{sql connection = "duckdb_con", error = TRUE}
+ALTER TABLE tiny_data ALTER sex SET DATA TYPE sex_enum USING sex;
+```
+
+```{sql connection = "duckdb_con", error = TRUE}
+ALTER TABLE tiny_data ALTER sex 
+SET DATA TYPE sex_enum USING CAST(sex AS sex_enum);
+```
+
+It makes sense that simply changing the data type does not work. After all, 
+enums have a different underlying representation. But there is a workaround: create a new table and update its values to those of the original varchar column.
+
+```{sql connection = "duckdb_con"}
+ALTER TABLE tiny_data ADD COLUMN sex_2 sex_enum;
+```
+
+```{sql connection = "duckdb_con"}
+UPDATE tiny_data SET sex_2 = sex::sex_enum;
+```
+
+```{sql connection = "duckdb_con"}
+SELECT sex, sex_2 FROM tiny_data LIMIT 10;
+```
+
+That works!, but it's not ideal. So I would prefer to directly ingest the data
+into an enum column. Let's see how to do that.
+
+```{sql connection = "duckdb_con"}
+CREATE TABLE tiny_data_sex AS
+SELECT sex::sex_enum --cast into the enum type
+FROM read_csv_auto('D:/tiny_data.txt') --read from the csv file
+```
+
+```{sql connection = "duckdb_con"}
+SELECT * FROM tiny_data_sex LIMIT 10;
+```
+
+Good! Creating the table with the enum data type and then using a COPY statement also works.
+
+There are a couple of slight inconveniences, though. To take advantage of enums, you need to know all unique values in advance and explicitly create the enum type before reading the data from the csv. Both are minor issues, but they can slow you down. 
+- The need to explicitly create the enum type it's just one more step before you can play with the data. And quite often -when there are more than a handful of unique values- it would involve reading the values from some other place and deal with the potential issues in that process (missing or invalid values and so on).
+- The need to know all unique values in advance could be a bit more troublesome. First, even though ideally you should always have a reference table for such columns, very often you just get the CSV file and no reference tables at all for the categorical variables. And sometimes even when you think you know the unique values, things can go south if there are errors in the data, or in your assumption for unique values. And example: the sex enum was created with values Female and Male, but it turns out in the last year, now they allow a new category; non-binary. Then it fails ingesting data for that year. And you would need to also ingest again the data from the previous years, because enums are currently static and you cannot update the enum to make it compatible with the data for the last year.
+
+Luckily, the DuckDB team has in the roadmap improvements for both issues above. They have in mind to automatically detect those kind of columns and handle them as enums. And they also plan to allow insertion and removal of values into the enum. That sounds great. Hopefully it has some priority and we can benefit from such improvements soon.
+
+# Results
+
+Ok, let's see the benefits of ENUM in my playground dataset (Figure below). Basically, it helps cut the database size in 30-40% and also help with the ingest time for large data.
+
+```{r enum-res-plot}
+#| out.width = "85%",
+#| fig.asp = 450/1250,
+#| fig.width = 9,
+#| fig.align = 'center',
+#| dev = "svg",
+#| echo = FALSE
+
+tar_data <- 
+  data.frame(
+    src_file = c(
+      "D:/tiny_data.txt",
+      "D:/small_data.txt",
+      "D:/mid_data.txt",
+      "D:/year_data.txt"
+    ),
+    src_file_desc = c(
+      "Tiny Data\n~1M rows\n~170MB", 
+      "Small data\n~10M rows\n~1.7GB", 
+      "Mid data\n~60M rows\n~10GB", 
+      "Year data\n~486M rows\n~82GB csv"
+    )
+  ) |> 
+  mutate(src_file_desc = factor(src_file_desc, levels = c(
+      "Year data\n~486M rows\n~82GB csv",
+      "Mid data\n~60M rows\n~10GB", 
+      "Small data\n~10M rows\n~1.7GB", 
+      "Tiny Data\n~1M rows\n~170MB"
+  ))) |> 
+  rowwise() |> 
+  # read the targets for auto ingest
+  mutate(auto_tar = list(tar_read_raw(
+    name = paste0("ingest_clean_slate_tar_", make.names(src_file)),
+    store = "/E/MEGA/R/backend_compare/_targets"
+  ))) |> 
+  # damn!, forgot to name the items in the target, so now I have to access
+  # them by position (and the positions differ!!! facepalm and ashamed emoji)
+  mutate(dbsize_auto = auto_tar[[1]]$database_size) |> 
+  mutate(ingesttime_auto = auto_tar[[3]]$toc - auto_tar[[3]]$tic) |> 
+  # read the targets for enum ingest
+  mutate(enum_tar = list(tar_read_raw(
+    name = paste0("ingest_enum_tar_", make.names(src_file)),
+    store = "/E/MEGA/R/backend_compare/_targets"
+  ))) |> 
+  mutate(dbsize_enum = enum_tar[[2]]$database_size) |> 
+  mutate(ingesttime_enum = enum_tar[[4]]$toc - enum_tar[[4]]$tic) |> 
+  ungroup() |> 
+  identity()
+
+
+plot_data <- tar_data |> 
+  select(-auto_tar, -enum_tar) |> 
+  mutate(across(
+    .cols = starts_with("dbsize"), 
+    .fns = readr::parse_number, 
+    .names = "{.col}_num"
+  )) |> 
+  mutate(across(
+    .cols = starts_with("ingesttime"),
+    .fns = prettyunits::pretty_sec,
+    .names = "{.col}_str"
+  )) |> 
+  rowwise() |> 
+  mutate(ingesttime_auto_str = ingesttime_auto_str |> 
+           stringr::str_split_fixed(" ", Inf) %>%
+           .[, 1:min(2, ncol(.))] %>%
+           paste(collapse = " ")
+  ) |> 
+  mutate(ingesttime_enum_str = ingesttime_enum_str |> 
+           stringr::str_split_fixed(" ", Inf) %>%
+           .[, 1:min(2, ncol(.))] %>%
+           paste(collapse = " ")
+  ) |> 
+  ungroup() |> 
+  rename(
+    ingesttime_auto_num = ingesttime_auto,
+    ingesttime_enum_num = ingesttime_enum,
+    dbsize_auto_str = dbsize_auto,
+    dbsize_enum_str = dbsize_enum
+  ) |> 
+  # mutate(ingesttime_diff = ingesttime_auto_num - ingesttime_enum_num) |> 
+  # mutate(dbsize_diff = dbsize_auto_num - dbsize_enum_num) |> 
+  # mutate(ingesttime_pdiff = ingesttime_diff / ingesttime_auto_num) |> 
+  # mutate(dbsize_pdiff = dbsize_diff / dbsize_auto_num) |> 
+  pivot_longer(
+    cols = c(-src_file, -src_file_desc),
+    names_to = c("outcome_method", ".value"),
+    names_pattern = "(.+)_(str|num)"
+  ) |> 
+  separate(outcome_method, into = c("outcome", "method"))
+
+p1 <- plot_data |> 
+  filter(outcome == "dbsize") |> 
+  ggplot(aes(x = method, y = num, fill = method)) +
+  geom_col() +
+  geom_text(aes(label = str), vjust = 0, size = 2.5) +
+  facet_wrap(facets = vars(src_file_desc), nrow = 1, scales = "free") +
+  scale_y_continuous(NULL, breaks = NULL, expand = c(0, 0, 0.1, 0)) +
+  scale_fill_manual(
+    values = wesanderson::wes_palette("Zissou1", n = 5)[c(4, 1)]
+  ) +
+  ggthemes::theme_tufte(base_size = 10) +
+  theme(legend.position = "none") +
+  theme(panel.border = element_rect(fill = NA, colour = "lightgrey")) +
+  xlab("Data type for categorical columns: auto-detected vs. using enum") +
+  ggtitle("Database Size")
+
+p2 <- plot_data |> 
+  filter(outcome == "ingesttime") |> 
+  ggplot(aes(x = method, y = num, fill = method)) +
+  geom_col() +
+  geom_text(aes(label = str), vjust = 0, size = 2.5) +
+  facet_wrap(facets = vars(src_file_desc), nrow = 1, scales = "free") +
+  scale_y_continuous(NULL, breaks = NULL, expand = c(0, 0, 0.1, 0)) +
+  scale_fill_manual(
+    values = wesanderson::wes_palette("Zissou1", n = 5)[c(4, 1)]
+  ) +
+  ggthemes::theme_tufte(base_size = 10) +
+  theme(legend.position = "none") +
+  theme(panel.border = element_rect(fill = NA, colour = "lightgrey")) +
+  xlab("Data type for categorical columns: auto-detected vs. using enum") +
+  ggtitle("Time to ingest the data")
+
+patchwork::wrap_plots(
+  p1, patchwork::plot_spacer(), p2, 
+  nrow = 1,
+  widths = c(10, 1, 10)
+) 
+```
+
+# Wrap-up
+
+- ENUM seem awesome, and it has a promising roadmap in DuckDB. 
+- Please, do use them, even though there might be a couple of slight inconveniences, the benefits in terms of database size, ingest and query times clearly outweigh those costs
+
+
+

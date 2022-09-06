@@ -1,0 +1,250 @@
+---
+title: Playing with Enums in DuckDB
+author: edalfon
+date: '2022-01-09'
+slug: playing-with-enums-in-duckdb
+categories:
+  - R
+tags:
+  - DuckDB
+description: ~
+image: ~
+math: ~
+license: ~
+hidden: no
+comments: yes
+---
+
+
+
+
+
+```r
+duckdb_dir <- "/backend/duckdb"
+fs::dir_delete(duckdb_dir)
+fs::dir_create(duckdb_dir)
+```
+
+Time: 0.06 secs
+
+
+
+```r
+duckdb_con <- DBI::dbConnect(
+  duckdb::duckdb(), 
+  paste0(duckdb_dir, "/backend.duckdb")
+)
+```
+
+Time: 0.18 secs
+
+
+
+```sql
+CREATE TABLE tiny_data AS
+SELECT *
+FROM read_csv_auto('/backend/tiny_data.txt')
+;
+```
+
+Time: 4.45 secs
+
+
+```sql
+DESCRIBE tiny_data;
+```
+
+
+<div class="knitsql-table">
+
+
+Table: (\#tab:unnamed-chunk-4)Displaying records 1 - 10
+
+|Field    |Type      |Null | Key|Default | Extra|
+|:--------|:---------|:----|---:|:-------|-----:|
+|firm     |VARCHAR   |YES  |  NA|NA      |    NA|
+|reg_type |INTEGER   |YES  |  NA|NA      |    NA|
+|seq      |INTEGER   |YES  |  NA|NA      |    NA|
+|id_type  |VARCHAR   |YES  |  NA|NA      |    NA|
+|id_num   |VARCHAR   |YES  |  NA|NA      |    NA|
+|bdate    |TIMESTAMP |YES  |  NA|NA      |    NA|
+|sex      |VARCHAR   |YES  |  NA|NA      |    NA|
+|code     |INTEGER   |YES  |  NA|NA      |    NA|
+|cat1     |VARCHAR   |YES  |  NA|NA      |    NA|
+|cat2     |VARCHAR   |YES  |  NA|NA      |    NA|
+
+</div>
+Time: 1.81 secs
+
+
+
+```sql
+PRAGMA database_size;
+```
+
+
+<div class="knitsql-table">
+
+
+Table: (\#tab:unnamed-chunk-5)1 records
+
+|database_size | block_size| total_blocks| used_blocks| free_blocks|wal_size |memory_usage |memory_limit |
+|:-------------|----------:|------------:|-----------:|-----------:|:--------|:------------|:------------|
+|166.1MB       |     262144|          634|         634|           0|0 bytes  |165.4MB      |27.4GB       |
+
+</div>
+Time: 0.01 secs
+ALTER TABLE tiny_data ALTER firm TYPE firm;
+
+
+```r
+create_enum_sql <- function(col) {
+  
+  col_vls <- DBI::dbGetQuery(duckdb_con, glue::glue_sql(.con = duckdb_con, "
+    SELECT DISTINCT({`col`}) AS vls FROM tiny_data;
+  ")) |> 
+    dplyr::pull(vls)
+  
+  glue::glue_sql(.con = duckdb_con, "
+    CREATE TYPE {`col`} AS ENUM ({col_vls*});
+  ")
+}
+```
+
+Time: 0 secs
+
+
+
+```r
+text_cols <- c("sex", "firm", "id_type", "cat1", "cat2", "product", 
+               "prod_type", "prod_dept", "provider")
+enums_sql <- purrr::map(text_cols, ~create_enum_sql(.x))
+```
+
+Time: 2.68 secs
+
+
+
+
+```r
+DBI::dbDisconnect(duckdb_con, shutdown = TRUE)
+#rm(duckdb_con)
+gc()
+```
+
+```
+##           used (Mb) gc trigger (Mb) max used (Mb)
+## Ncells  872781 46.7    1671784 89.3  1321850 70.6
+## Vcells 1527169 11.7    8388608 64.0  2303149 17.6
+```
+
+```r
+fs::dir_delete(duckdb_dir)
+fs::dir_create(duckdb_dir)
+```
+
+Time: 0.22 secs
+
+
+```r
+duckdb_con <- DBI::dbConnect(
+  duckdb::duckdb(), 
+  paste0(duckdb_dir, "/backend.duckdb")
+)
+```
+
+Time: 0.15 secs
+
+
+
+```r
+purrr::map(enums_sql, ~DBI::dbExecute(duckdb_con, .x))
+```
+
+Time: 0.06 secs
+
+
+```sql
+CREATE TABLE tiny_data AS
+SELECT 
+  firm::firm AS firm, 
+  reg_type, 
+  seq, 
+  id_type::id_type AS id_type, 
+  id_num, 
+  bdate, 
+  sex::sex AS sex, 
+  code, 
+  cat1::cat1 AS cat1, 
+  cat2::cat2 AS cat2, 
+  sdate, 
+  product::product AS product, 
+  prod_type::prod_type AS prod_type, 
+  prod_dept::prod_dept AS prod_dept, 
+  prod_variants, 
+  value, 
+  value_add, 
+  provider::provider AS provider, 
+  age, 
+  age_group, 
+  age_group2, 
+  seq2, 
+  value2, 
+  value3, 
+  value_tot
+FROM read_csv_auto('/backend/tiny_data.txt')
+;
+```
+
+Time: 4.1 secs
+
+
+
+```sql
+DESCRIBE tiny_data;
+```
+
+
+<div class="knitsql-table">
+
+
+Table: (\#tab:unnamed-chunk-12)Displaying records 1 - 10
+
+|Field    |Type      |Null | Key|Default | Extra|
+|:--------|:---------|:----|---:|:-------|-----:|
+|firm     |firm      |YES  |  NA|NA      |    NA|
+|reg_type |INTEGER   |YES  |  NA|NA      |    NA|
+|seq      |INTEGER   |YES  |  NA|NA      |    NA|
+|id_type  |id_type   |YES  |  NA|NA      |    NA|
+|id_num   |VARCHAR   |YES  |  NA|NA      |    NA|
+|bdate    |TIMESTAMP |YES  |  NA|NA      |    NA|
+|sex      |sex       |YES  |  NA|NA      |    NA|
+|code     |INTEGER   |YES  |  NA|NA      |    NA|
+|cat1     |cat1      |YES  |  NA|NA      |    NA|
+|cat2     |cat2      |YES  |  NA|NA      |    NA|
+
+</div>
+Time: 0.75 secs
+
+
+
+```sql
+PRAGMA database_size;
+```
+
+
+<div class="knitsql-table">
+
+
+Table: (\#tab:unnamed-chunk-13)1 records
+
+|database_size | block_size| total_blocks| used_blocks| free_blocks|wal_size |memory_usage |memory_limit |
+|:-------------|----------:|------------:|-----------:|-----------:|:--------|:------------|:------------|
+|83.6MB        |     262144|          319|         319|           0|0 bytes  |79.6MB       |27.4GB       |
+
+</div>
+Time: 0 secs
+
+
+
+
