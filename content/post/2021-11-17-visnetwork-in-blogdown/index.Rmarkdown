@@ -1,0 +1,53 @@
+---
+title: visNetwork in blogdown?
+author: ''
+date: '2021-11-17'
+slug: visnetwork-in-blogdown
+categories: []
+tags: []
+description: ~
+image: ~
+math: ~
+license: ~
+hidden: no
+comments: yes
+---
+
+Ok, it works just like that
+```{r}
+library(visNetwork)
+nodes <- data.frame(id = 1:4)
+edges <- data.frame(from = c(2,4,3,3), to = c(1,2,4,2))
+
+visNetwork(nodes, edges, width = "100%") |> 
+  visNodes(shape = "square", 
+           color = list(background = "lightblue", 
+                        border = "darkblue",
+                        highlight = "yellow"),
+           shadow = list(enabled = TRUE, size = 10)) |> 
+  visLayout(randomSeed = 12) # to have always the same network     
+```
+
+But remember, to add several htmlwidgets from a single chunk (e.g. in a loop) you need to use `knitr::knit_print`
+```{r}
+library(visNetwork)
+nodes <- data.frame(id = 1:4)
+edges <- data.frame(from = c(2,4,3,3), to = c(1,2,4,2))
+
+vn1 <- visNetwork(nodes, edges, width = "100%") 
+
+vn2 <- visNetwork(nodes, edges, width = "100%") |> 
+  visNodes(shape = "square", 
+           color = list(background = "lightblue", 
+                        border = "darkblue",
+                        highlight = "yellow"),
+           shadow = list(enabled = TRUE, size = 10)) |> 
+  visLayout(randomSeed = 12) # to have always the same network    
+
+cat("\n\nFirst \n\n")
+knitr::knit_print(vn1)
+cat("\n\nSecond \n\n")
+knitr::knit_print(vn2)
+```
+
+
