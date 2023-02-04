@@ -1,0 +1,245 @@
+---
+title: What works here?
+author: E!
+date: '2021-12-03'
+slug: what-works-here
+categories:
+tags:
+  - blogdown
+description: still need to bring older posts here!
+image: https://i.imgur.com/lsjJif9h.png
+math: yes
+license: ~
+hidden: no
+comments: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, warning = FALSE, message = FALSE, error = TRUE, 
+  include = TRUE, cache.comments = TRUE, cache = TRUE, fig.height = 4, 
+  fig.width = 5
+)
+
+#knitr::opts_knit$set(upload.fun = knitr::imgur_upload)
+# https://superuser.com/questions/1238552/how-to-resize-quickly-a-imgur-image
+```
+
+
+#  Details - Summary
+
+<details><summary>Click Here!</summary>
+<p>
+And hidden details will show
+</p>
+</details>
+
+They can also contain code
+
+<details><summary>Click Here!</summary>
+<p>
+```{r}
+toydf <- data.frame(foo = 1:10, bar = 20:29)
+base::summary(toydf)
+```
+</p>
+</details>
+
+They can also contain plots
+
+<details><summary>Click Here!</summary>
+<p>
+```{r}
+hist(mtcars$mpg)
+```
+</p>
+</details>
+
+# Tabs 
+
+There does not seem to be native support, as in normal rmarkdown fo example.
+
+https://github.com/rstudio/blogdown/issues/69
+https://github.com/yihui/hugo-prose/issues/25
+
+But [completely css tabs](https://kyusuf.com/post/completely-css-tabs/) 
+seems to work.
+
+<style>
+  * {
+  box-sizing: border-box;
+}
+
+body {
+  padding: 10px;
+  background: #f2f2f2;
+}
+
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  max-width: 700px;
+  background: #efefef;
+  box-shadow: 0 48px 80px -32px rgba(0,0,0,0.3);
+}
+
+.input {
+  position: absolute;
+  opacity: 0;
+}
+
+.label {
+  width: 100%;
+  padding: 20px 30px;
+  background: #e5e5e5;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 18px;
+  color: #7f7f7f;
+  transition: background 0.1s, color 0.1s;
+}
+
+.label:hover {
+  background: #d8d8d8;
+}
+
+.label:active {
+  background: #ccc;
+}
+
+.input:focus + .label {
+  box-shadow: inset 0px 0px 0px 3px #2aa1c0;
+  z-index: 1;
+}
+
+.input:checked + .label {
+  background: #fff;
+  color: #000;
+}
+
+@media (min-width: 600px) {
+  .label {
+    width: auto;
+  }
+}
+
+.panel {
+  display: none;
+  padding: 20px 30px 30px;
+  background: #fff;
+}
+
+@media (min-width: 600px) {
+  .panel {
+    order: 99;
+  }
+}
+
+.input:checked + .label + .panel {
+  display: block;
+}
+
+
+</style>
+
+<div class="tabs">
+  <input name="tabs" type="radio" id="tab-1" checked="checked" class="input"/>
+  <label for="tab-1" class="label">Orange</label>
+  <div class="panel">
+    <h1>Orange</h1>
+    <p>The orange (specifically, the sweet orange) is the fruit of the citrus species Citrus × sinensis in the family Rutaceae</p>
+    <p>The fruit of the Citrus × sinensis is considered a sweet orange, whereas the fruit of the Citrus × aurantium is considered a bitter orange. The sweet orange reproduces asexually (apomixis through nucellar embryony); varieties of sweet orange arise through mutations.</p>
+  </div>
+
+  <input name="tabs" type="radio" id="tab-2" class="input"/>
+  <label for="tab-2" class="label">Tangerine</label>
+  <div class="panel">
+    <h1>Tangerine</h1>
+    <p>The tangerine (Citrus tangerina) is an orange-colored citrus fruit that is closely related to, or possibly a type of, mandarin orange (Citrus reticulata).</p>
+    <p>The name was first used for fruit coming from Tangier, Morocco, described as a mandarin variety. Under the Tanaka classification system, Citrus tangerina is considered a separate species.</p>
+  </div>
+
+  <input name="tabs" type="radio" id="tab-3" class="input"/>
+  <label for="tab-3" class="label">Clemantine</label>
+  <div class="panel">
+    <h1>Clemantine</h1>
+    <p>A clementine (Citrus ×clementina) is a hybrid between a mandarin orange and a sweet orange, so named in 1902. The exterior is a deep orange colour with a smooth, glossy appearance. Clementines can be separated into 7 to 14 segments. Similarly to tangerines, they tend to be easy to peel.</p>
+  </div>
+</div>
+
+Good!, verbose as hell, but, it works.
+
+<div class="tabs">
+  <input name="tabs" type="radio" id="tab-10" checked="checked" class="input"/>
+  <label for="tab-10" class="label">Code</label>
+  <div class="panel">
+
+```{r}
+toydf <- data.frame(foo = 1:10, bar = 20:29)
+base::summary(toydf)
+```
+
+  </div>
+
+  <input name="tabs" type="radio" id="tab-20" class="input"/>
+  <label for="tab-20" class="label">Plot</label>
+  <div class="panel">
+```{r}
+hist(mtcars$mpg)
+```
+  </div>
+
+  <input name="tabs" type="radio" id="tab-30" class="input"/>
+  <label for="tab-30" class="label">Iteractive</label>
+  <div class="panel">
+
+```{r}
+# Example from plotly page https://plotly.com/r/bubble-charts/
+library(plotly)
+
+data <- read.csv("https://raw.githubusercontent.com/plotly/datasets/master/school_earnings.csv")
+
+data$State <- as.factor(c(
+  'Massachusetts', 'California', 'Massachusetts', 'Pennsylvania', 'New Jersey', 
+  'Illinois', 'Washington DC', 'Massachusetts', 'Connecticut', 'New York', 
+  'North Carolina', 'New Hampshire', 'New York', 'Indiana', 'New York', 
+  'Michigan', 'Rhode Island', 'California', 'Georgia', 'California', 
+  'California'
+))
+
+fig <- plot_ly(
+  data, x = ~Women, y = ~Men, text = ~School, type = 'scatter', 
+  mode = 'markers', size = ~Gap, color = ~State, colors = 'Paired', 
+  marker = list(opacity = 0.5, sizemode = 'diameter')
+)
+fig <- fig %>% layout(title = 'Gender Gap in Earnings per University',
+         xaxis = list(showgrid = FALSE),
+         yaxis = list(showgrid = FALSE),
+         showlegend = FALSE)
+
+fig
+```
+
+  </div>
+</div>
+
+Far from perfect, but it works.
+
+# Options
+
+Remember to set this options, taken from the blogdown slides
+
+> Hugo is fast. You are likely to be satisfied by the speed of the live preview via Serve Site (or blogdown::serve_site()).
+
+> But live preview can be (a lot) faster. It may just take 10 milliseconds to re-render the site, if you install the processx package, and set an option in R:
+```
+options(blogdown.generator.server = TRUE)
+```
+> By default, blogdown renders the full site to disk on changes and reload it in your browser, which may take one or two seconds. If you set this option, blogdown will take advantage of Hugo's own server (via the command hugo server), which is much faster.
+
+```
+options(
+  blogdown.generator.server = TRUE,
+  blogdown.hugo.server = c('-D', '-F', '--navigateToChanged')
+)
+```
