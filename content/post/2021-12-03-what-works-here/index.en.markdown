@@ -21,7 +21,7 @@ comments: yes
 <link href="{{< blogdown/postref >}}index.en_files/crosstalk/css/crosstalk.min.css" rel="stylesheet" />
 <script src="{{< blogdown/postref >}}index.en_files/crosstalk/js/crosstalk.min.js"></script>
 <link href="{{< blogdown/postref >}}index.en_files/plotly-htmlwidgets-css/plotly-htmlwidgets.css" rel="stylesheet" />
-<script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/1.33.1/plotly.min.js"></script>
+<script src="{{< blogdown/postref >}}index.en_files/plotly-main/plotly-latest.min.js"></script>
 
 # Details - Summary
 
