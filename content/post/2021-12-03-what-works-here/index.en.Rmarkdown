@@ -17,11 +17,11 @@ comments: yes
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
   echo = TRUE, warning = FALSE, message = FALSE, error = TRUE, 
-  include = TRUE, cache.comments = TRUE, cache = TRUE, fig.height = 4, 
+  include = TRUE, cache.comments = TRUE, cache = FALSE, fig.height = 4, 
   fig.width = 5
 )
 
-#knitr::opts_knit$set(upload.fun = knitr::imgur_upload)
+knitr::opts_knit$set(upload.fun = knitr::imgur_upload)
 # https://superuser.com/questions/1238552/how-to-resize-quickly-a-imgur-image
 ```
 
@@ -227,7 +227,7 @@ Far from perfect, but it works.
 
 # Options
 
-Remember to set this options, taken from the blogdown slides
+Remember to set this option, taken from the blogdown slides
 
 > Hugo is fast. You are likely to be satisfied by the speed of the live preview via Serve Site (or blogdown::serve_site()).
 
