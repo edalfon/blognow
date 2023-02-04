@@ -225,6 +225,15 @@ fig
 
 Far from perfect, but it works.
 
+NOTE: I don't know what exactly is going on. Locally, the interactive plot 
+works. But netlify's build fails due to plugin error. The cuprit seems to 
+be plotly javascript main assets (plotly-latest.mim.js); as soon as you commit 
+this, netlify's build fail. It even fails without this, but linking it via CDN.
+(which is actually a TODO, to do that for all interactive stuff).There should 
+be some weird interaction between plotly and other things in this post, 
+because plotly works in netlify in other posts in this blog. But I am not 
+in the mood of finding out more.
+
 # Options
 
 Remember to set this option `blogdown.generator.server = TRUE`. From the blogdown slides:
