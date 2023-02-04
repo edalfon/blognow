@@ -227,7 +227,7 @@ Far from perfect, but it works.
 
 # Options
 
-Remember to set this option, taken from the blogdown slides
+Remember to set this option `blogdown.generator.server = TRUE`. From the blogdown slides:
 
 > Hugo is fast. You are likely to be satisfied by the speed of the live preview via Serve Site (or blogdown::serve_site()).
 
